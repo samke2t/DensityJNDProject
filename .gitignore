@@ -16,3 +16,4 @@ Recordings/
 *.pidb
 *.pdb
 *.mdb
+mono_crash.*.json

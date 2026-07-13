@@ -8,11 +8,12 @@ public class UI_AnswerInput : MonoBehaviour
 
     [Header("Study Manager")]
     [SerializeField] private StudyManager studyManager;
+    [SerializeField] private StudyUIController uiController;
 
 
     [Header("Information Text")]
-    [SerializeField] private TMP_Text phaseText;           // TODO：只显示 Training，Formal，Redo
-    [SerializeField] private TMP_Text blockText;           // 第几个 Block（TODO：如果只有一个 Block 可以不显示）
+    [SerializeField] private TMP_Text phaseText;           // 只显示 Training，Formal，Redo
+    [SerializeField] private TMP_Text blockText;           // 多 Block 实验时显示当前 Block
     [SerializeField] private TMP_Text trialText;           // 这个 Block 的第几个 trial
     [SerializeField] private TMP_Text countdownText;       // 这个 Trial 的倒计时
     [SerializeField] private TMP_Text messageText;         // 提示文本
@@ -32,45 +33,62 @@ public class UI_AnswerInput : MonoBehaviour
     #region =============== UI Input & Update ===============
 
     private int currentAnswer = 0; // 0=None, 1=Left, 2=Right
+    private ColorBlock leftDefaultColors;
+    private ColorBlock rightDefaultColors;
 
     #endregion ====================================================
 
 
-    #region =============== UI Synchronization ===============
+    #region =============== Answer UI Synchronization ===============
 
     // StudyManager 的 AnswerUIReflash 调用的功能
     public void RefreshTrialInformation()
     {
         currentAnswer = 0;
 
-        messageText.text = "";
-        
-        // TODO: 每个Trial开始时调用。
-        // 1. (如果有）清空上一个Trial的选择，初始化 UI 状态。
-        // 2. 更新Participant ID。
-        // 4. 更新Block编号。 studyManager.blockId + 1 (
-        // 5. 更新Trial编号。 根据现在的 phase 来决定显示的是 trainingTrialId + 1 还是 formalTrialId + 1
-        // 6. 清空提示文字。
-        // 7. 各个Button的状态管理
+        if (messageText != null) messageText.text = "";
         
         // 注：给用户看都是从 1 开始数
 
-        submitButton.interactable = true;
-        
+        if (phaseText != null) phaseText.text = studyManager.currentPhase.ToString();
+        if (blockText != null)
+        {
+            blockText.gameObject.SetActive(studyManager.BlockCount > 1);
+            blockText.text = "Block " + (studyManager.currentBlock + 1);
+        }
+        if (trialText != null)
+        {
+            int trial = studyManager.currentPhase == StudyManager.StudyPhase.Training
+                ? studyManager.currentTrainingTrial
+                : studyManager.currentFormalTrial;
+            trialText.text = "Trial " + (trial + 1);
+        }
+
+        ResetAnswerColors();
+        SetAnswerButtonsInteractable(true);
+        if (submitButton != null) submitButton.interactable = true;
+
         if (studyManager.currentPhase == StudyManager.StudyPhase.Training)
         {
-            // TODO: 只有在 Training 的时候才显示的 Button
-            // 1. nextButton 
-            // 2. TrainingAgainButton
-            // 3. StartFormalButton
-            nextButton.interactable = false;
+            SetButtonState(nextButton, true, false);
+            SetButtonState(trainingAgainButton, true, false);
+            SetButtonState(startFormalButton, true, false);
         }
+        else
+        {
+            SetButtonState(nextButton, false, false);
+            SetButtonState(trainingAgainButton, false, false);
+            SetButtonState(startFormalButton, false, false);
+        }
+
+        uiController?.ShowAnswering();
     }
 
 
     public void ShowCorrect(int correctId)
     {
-        // TODO: 根据传入的正确答案的 id，对比参与者的输入，参与者对了是绿色，参与者错了则输入的那个标红，正确答案标绿
+        ApplyResultColor(leftButton, 1, correctId);
+        ApplyResultColor(rightButton, 2, correctId);
     }
     
     
@@ -87,14 +105,28 @@ public class UI_AnswerInput : MonoBehaviour
             // TODO：根据最后的UI group 的设置需求修改获取的方式
             studyManager = this.transform.parent.GetComponentInChildren<StudyManager>();
         }
+
+        if (uiController == null)
+        {
+            uiController = transform.root.GetComponentInChildren<StudyUIController>(true);
+        }
+
+        if (leftButton != null) leftDefaultColors = leftButton.colors;
+        if (rightButton != null) rightDefaultColors = rightButton.colors;
     }
     
     
     private void Update()
     {
+        if (studyManager == null)
+        {
+            if (countdownText != null) countdownText.text = "";
+            return;
+        }
+
         if (studyManager.trialStartTime < 0f)
         {
-            countdownText.text = "";
+            if (countdownText != null) countdownText.text = "";
             return;
         }
 
@@ -102,11 +134,11 @@ public class UI_AnswerInput : MonoBehaviour
 
         if (remainingTime > 0f)
         {
-            countdownText.text = Mathf.CeilToInt(remainingTime).ToString();
+            if (countdownText != null) countdownText.text = Mathf.CeilToInt(remainingTime).ToString();
         }
         else
         {
-            countdownText.text = "";
+            if (countdownText != null) countdownText.text = "";
         }
     }
     
@@ -120,16 +152,14 @@ public class UI_AnswerInput : MonoBehaviour
     public void OnLeftClicked()
     {
         currentAnswer = 1;
-
-        // TODO：更新左右按钮的选中状态。
+        UpdateSelectionColors();
     }
 
 
     public void OnRightClicked()
     {
         currentAnswer = 2;
-
-        // TODO：更新左右按钮的选中状态。
+        UpdateSelectionColors();
     }
 
 
@@ -137,34 +167,91 @@ public class UI_AnswerInput : MonoBehaviour
     {
         if (currentAnswer == 0)
         {
-            // TODO：绑定一个 Text object， 提示 "Please select an answer."，可改
-            messageText.text = "Please select an answer.";
+            if (messageText != null) messageText.text = "Please select an answer.";
             return;
         }
 
-        if (studyManager.currentPhase == StudyManager.StudyPhase.Training)
-        {
-            submitButton.interactable = false;
-            nextButton.interactable = true;
-        }
+        if (submitButton != null) submitButton.interactable = false;
+        SetAnswerButtonsInteractable(false);
 
         studyManager.OnTrialSubmit(currentAnswer);
+
+        if (studyManager.currentPhase == StudyManager.StudyPhase.Training)
+        {
+            bool isLastTrial = studyManager.IsLastTrainingTrial;
+            SetButtonState(nextButton, true, !isLastTrial);
+            SetButtonState(trainingAgainButton, true, isLastTrial);
+            SetButtonState(startFormalButton, true, isLastTrial);
+        }
     }
 
-    // TODO: 这个 Button 只在 Training 阶段出现
     public void OnNextClicked()
     {
+        SetButtonState(nextButton, nextButton != null && nextButton.gameObject.activeSelf, false);
         studyManager.NextTrial();
     }
 
     public void OnTrainingAgainClicked()
     {
+        SetButtonState(trainingAgainButton, true, false);
+        SetButtonState(startFormalButton, true, false);
         studyManager.RestartTraining();
     }
 
     public void OnStartFormalClicked()
     {
+        SetButtonState(trainingAgainButton, true, false);
+        SetButtonState(startFormalButton, true, false);
         studyManager.FinishTraining();
+    }
+
+    private void SetAnswerButtonsInteractable(bool interactable)
+    {
+        if (leftButton != null) leftButton.interactable = interactable;
+        if (rightButton != null) rightButton.interactable = interactable;
+    }
+
+    private static void SetButtonState(Button button, bool visible, bool interactable)
+    {
+        if (button == null) return;
+        button.gameObject.SetActive(visible);
+        button.interactable = interactable;
+    }
+
+    private void ResetAnswerColors()
+    {
+        if (leftButton != null) leftButton.colors = leftDefaultColors;
+        if (rightButton != null) rightButton.colors = rightDefaultColors;
+    }
+
+    private void UpdateSelectionColors()
+    {
+        ResetAnswerColors();
+        Button selected = currentAnswer == 1 ? leftButton : rightButton;
+        if (selected == null) return;
+
+        ColorBlock colors = selected.colors;
+        colors.normalColor = new Color(0.071f, 0.412f, 0.788f, 1f);
+        colors.selectedColor = colors.normalColor;
+        selected.colors = colors;
+        if (messageText != null) messageText.text = "";
+    }
+
+    private void ApplyResultColor(Button button, int answerId, int correctId)
+    {
+        if (button == null) return;
+        ColorBlock colors = button.colors;
+        if (answerId == correctId)
+        {
+            colors.normalColor = new Color(0.220f, 0.647f, 0.408f, 1f);
+            colors.disabledColor = colors.normalColor;
+        }
+        else if (answerId == currentAnswer)
+        {
+            colors.normalColor = new Color(0.878f, 0.337f, 0.380f, 1f);
+            colors.disabledColor = colors.normalColor;
+        }
+        button.colors = colors;
     }
 
     #endregion ====================================================

@@ -72,6 +72,8 @@ public class StudyManager : MonoBehaviour
     [SerializeField] public StimuliRender stimuliRender;
     [SerializeField] public UI_StartInput startInput;
     [SerializeField] public UI_AnswerInput answerInput;
+
+    private StudyUIController uiController;
     
     
 
@@ -89,6 +91,10 @@ public class StudyManager : MonoBehaviour
     public int currentAnswer;                  // 参与者答案
     public float stimulusVisibleSeconds = 5f; // TODO：Stimuli 可见的时长，后期可以调整
     public float trialStartTime;               // 可用 stimulusVisibleSeconds - trialStartTime 得到倒计时
+
+    public bool IsLastTrainingTrial =>
+        currentPhase == StudyPhase.Training && currentTrainingTrial >= trainingCountPB - 1;
+    public int BlockCount => blockCount;
     
     #endregion ====================================================
     
@@ -126,7 +132,6 @@ public class StudyManager : MonoBehaviour
     
     
     // 状态记录
-    private bool NextTraining = false;         // 是否有下一个 training trial
     private bool debugMode = false;            // 是否输出 Log 文档来记录运行信息
     private bool loadSuccess = true;           // 是否成功读取实验配置文件
     
@@ -158,6 +163,11 @@ public class StudyManager : MonoBehaviour
         if(startInput == null)
         {
             startInput = transform.parent.GetComponentInChildren<UI_StartInput>();
+        }
+        uiController = transform.parent.GetComponentInChildren<StudyUIController>(true);
+        if (playerPosition == null && Camera.main != null)
+        {
+            playerPosition = Camera.main.transform;
         }
         
         // TODO: 激活StartUI，等待用户输入（有需要修改可以改）
@@ -199,7 +209,11 @@ public class StudyManager : MonoBehaviour
     public IEnumerator StartStudyRoutine(int participantId)
     {
         yield return ParticipantInit(participantId);
-        if (!loadSuccess) { yield break; }
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
         
         // ===============================================================
         // 加载完成后，进入第一个 training trial
@@ -218,19 +232,29 @@ public class StudyManager : MonoBehaviour
     {
         if (blockId < 0 || blockId >= blockCount)
         {
-            // TODO： warning 显示 Block 输入错误
+            ShowWarning($"Block must be between 1 and {blockCount}.");
+            uiController?.SetStartBusy(false);
             return;
         }
 
         if (phase == StudyPhase.Training && (trialId < 0 || trialId >= trainingCountPB))
         {
-            // TODO: warning 显示 Training Trial 输入错误
+            ShowWarning($"Training trial must be between 1 and {trainingCountPB}.");
+            uiController?.SetStartBusy(false);
             return;
         }
 
         if (phase == StudyPhase.Formal && (trialId < 0 || trialId >= trialCountPB))
         {
-            // TODO: warning 显示 Formal Trial 输入错误
+            ShowWarning($"Formal trial must be between 1 and {trialCountPB}.");
+            uiController?.SetStartBusy(false);
+            return;
+        }
+
+        if (phase != StudyPhase.Training && phase != StudyPhase.Formal)
+        {
+            ShowWarning("Please select Training or Formal.");
+            uiController?.SetStartBusy(false);
             return;
         }
         
@@ -240,7 +264,11 @@ public class StudyManager : MonoBehaviour
     public IEnumerator StartTrialRoutine(int participantId, int blockId, int trialId, StudyPhase phase)
     {
         yield return ParticipantInit(participantId);
-        if (!loadSuccess) { yield break; }
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
         
         currentBlock = blockId;
         
@@ -455,7 +483,7 @@ public class StudyManager : MonoBehaviour
             // 如果当前已经是最后一个 training trial，就不要再往后取
             if (currentTrainingTrial >= trainingCountPB - 1)
             {
-                NextTraining = false;
+                return;
             }
             else
             {
@@ -669,8 +697,7 @@ public class StudyManager : MonoBehaviour
 
             if(!File.Exists(filePath))
             {
-                warningUI.SetActive(true);
-                // TODO：warning UI 上的文字修改为："Result file missing. \n Please check data output."
+                ShowWarning("Result file missing.\nPlease check the data output folder.");
 
                 return;
             }
@@ -877,8 +904,7 @@ public class StudyManager : MonoBehaviour
             if (request.result != UnityWebRequest.Result.Success)
             {
                 // TODO: Log 文档
-                warningUI.SetActive(true);
-                // TODO：warning UI 上的文字修改为对应 “Unable to load participant configuration file. ”
+                ShowWarning("Unable to load the participant configuration file.");
                 loadSuccess = false;
                 yield break;
             }
@@ -894,8 +920,7 @@ public class StudyManager : MonoBehaviour
             if (request.result != UnityWebRequest.Result.Success)
             {
                 // TODO: Log 文档
-                warningUI.SetActive(true);
-                // TODO：warning UI 上的文字修改为对应 “Unable to load trial order configuration file.”
+                ShowWarning("Unable to load the trial order configuration file.");
                 loadSuccess = false;
                 yield break;
             }
@@ -946,8 +971,7 @@ public class StudyManager : MonoBehaviour
         if (findParticipant == false)
         {
             // TODO: Log 文档
-            warningUI.SetActive(true);
-            // TODO：warning UI 上的文字修改为对应 “Participant ID not found. \n Please check the entered participant ID.”
+            ShowWarning("Participant ID not found.\nPlease check the entered participant ID.");
             
             loadSuccess = false;
             yield break;
@@ -995,8 +1019,7 @@ public class StudyManager : MonoBehaviour
             {
                 // TODO: Log 文档
                 
-                warningUI.SetActive(true);
-                // TODO：warning UI 上的文字修改为对应 “Trial order configuration not found. \n Please check the OrderList CSV and participant assignment.”
+                ShowWarning("Trial order configuration not found.\nPlease check the OrderList CSV and participant assignment.");
                 
                 loadSuccess = false;
                 yield break;
@@ -1019,8 +1042,7 @@ public class StudyManager : MonoBehaviour
             {
                 // TODO: Log 文档
                 
-                warningUI.SetActive(true);
-                // TODO：warning UI 上的文字修改为对应 “Unable to load stimulus data. \n Please check the stimulus file path and dataset name.”
+                ShowWarning("Unable to load scene information.\nPlease check the Scene CSV path.");
                 
                 loadSuccess = false;
                 yield break;
@@ -1086,8 +1108,7 @@ public class StudyManager : MonoBehaviour
                 {
                     // TODO: Log 文档
                 
-                    warningUI.SetActive(true);
-                    // TODO：warning UI 上的文字修改为对应 “Scene information not found. \n Please check the Scene CSV and trial order configuration.”
+                    ShowWarning("Scene information not found.\nPlease check the Scene CSV and trial order configuration.");
 
                     loadSuccess = false;
                     yield break;
@@ -1117,7 +1138,7 @@ public class StudyManager : MonoBehaviour
                     if (request.result != UnityWebRequest.Result.Success)
                     {
                         // TODO: Log 文档
-                        // TODO: UI 弹窗报错
+                        ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
                         loadSuccess = false;
                         yield break;
                     }
@@ -1189,10 +1210,25 @@ public class StudyManager : MonoBehaviour
 
     
     #endregion =========================================================================================================
-    
 
-    
-    
+
+    private void ShowWarning(string message)
+    {
+        if (uiController != null)
+        {
+            uiController.ShowWarning(message);
+        }
+        else if (warningUI != null)
+        {
+            warningUI.SetActive(true);
+        }
+
+        Debug.LogWarning(message);
+    }
+
+
+
+
     #region ======================================= Stimuli Management =================================================
     
     

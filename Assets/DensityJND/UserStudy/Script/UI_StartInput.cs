@@ -8,6 +8,7 @@ public class UI_StartInput : MonoBehaviour
 
     [Header("Study Manager")]
     [SerializeField] private StudyManager studyManager;
+    [SerializeField] private StudyUIController uiController;
 
 
     [Header("Participant Input")]
@@ -26,6 +27,8 @@ public class UI_StartInput : MonoBehaviour
 
     [Header("Message Text")]
     [SerializeField] private TMP_Text messageText;
+    [SerializeField] private Button startStudyButton;
+    [SerializeField] private Button startTrialButton;
 
     #endregion ====================================================
 
@@ -40,7 +43,12 @@ public class UI_StartInput : MonoBehaviour
             studyManager = transform.parent.GetComponentInChildren<StudyManager>();
         }
 
-        messageText.text = "";
+        if (uiController == null)
+        {
+            uiController = transform.root.GetComponentInChildren<StudyUIController>(true);
+        }
+
+        ShowMessage("");
         
     }
 
@@ -52,13 +60,20 @@ public class UI_StartInput : MonoBehaviour
     // Start 按钮调用：正常开始整个实验
     public void OnStartStudyClicked()
     {
-        if (!int.TryParse(participantIDInput.text, out int participantID))
+        if (studyManager == null)
         {
-            messageText.text = "Please enter a valid participant ID.";
+            ShowMessage("Study Manager is not available.");
             return;
         }
 
-        messageText.text = "";
+        if (participantIDInput == null || !int.TryParse(participantIDInput.text, out int participantID) || participantID < 0)
+        {
+            ShowMessage("Please enter a valid participant ID (0 or greater).");
+            return;
+        }
+
+        ShowMessage("");
+        uiController?.BeginLoading();
 
         studyManager.StartStudy(participantID);
     }
@@ -67,42 +82,71 @@ public class UI_StartInput : MonoBehaviour
     // Start Trial 按钮调用：从指定 Trial 开始
     public void OnStartTrialClicked()
     {
-        if (!int.TryParse(participantIDInput.text, out int participantID_Input))
+        if (studyManager == null)
         {
-            messageText.text = "Please enter a valid participant ID.";
+            ShowMessage("Study Manager is not available.");
             return;
         }
 
-        if (!int.TryParse(blockIDInput.text, out int blockID_Input))
+        if (participantIDInput == null || !int.TryParse(participantIDInput.text, out int participantID_Input) || participantID_Input < 0)
         {
-            messageText.text = "Please enter a valid block ID.";
+            ShowMessage("Please enter a valid participant ID (0 or greater).");
             return;
         }
 
-        if (!int.TryParse(trialIDInput.text, out int trialID_Input))
+        if (blockIDInput == null || !int.TryParse(blockIDInput.text, out int blockID_Input) || blockID_Input < 1)
         {
-            messageText.text = "Please enter a valid trial ID.";
+            ShowMessage("Block number must start at 1.");
+            return;
+        }
+
+        if (trialIDInput == null || !int.TryParse(trialIDInput.text, out int trialID_Input) || trialID_Input < 1)
+        {
+            ShowMessage("Trial number must start at 1.");
             return;
         }
 
         StudyManager.StudyPhase phase;
 
-        if (trainingToggle.isOn)
+        if (trainingToggle != null && trainingToggle.isOn)
         {
             phase = StudyManager.StudyPhase.Training;
-
         }
-        else
+        else if (formalToggle != null && formalToggle.isOn)
         {
             phase = StudyManager.StudyPhase.Formal;
         }
+        else
+        {
+            ShowMessage("Please select Training or Formal.");
+            return;
+        }
 
-        messageText.text = "";
+        ShowMessage("");
+        uiController?.BeginLoading();
         
        
 
-        // TODO：输入的时候可以按照 1 作为起始点输入，但数据存储按照 0 开始
         studyManager.StartTrial(participantID_Input, blockID_Input-1, trialID_Input-1, phase);
+    }
+
+    public void SetInteractable(bool interactable)
+    {
+        if (participantIDInput != null) participantIDInput.interactable = interactable;
+        if (blockIDInput != null) blockIDInput.interactable = interactable;
+        if (trialIDInput != null) trialIDInput.interactable = interactable;
+        if (trainingToggle != null) trainingToggle.interactable = interactable;
+        if (formalToggle != null) formalToggle.interactable = interactable;
+        if (startStudyButton != null) startStudyButton.interactable = interactable;
+        if (startTrialButton != null) startTrialButton.interactable = interactable;
+    }
+
+    public void ShowMessage(string message)
+    {
+        if (messageText != null)
+        {
+            messageText.text = message;
+        }
     }
 
     #endregion ====================================================
