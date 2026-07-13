@@ -109,6 +109,7 @@ public class StudyManager : MonoBehaviour
     private int trialCountPB;                  // 每个 block 有几个正式实验的 Trial
     private int trainingCountPB;               // 每个 block 有几个训练的 Trial
     private float clusterCenterAngleDeg = 20f; // 两个团中心之间的水平视角夹角
+    private float defaultStimulusDistance = 3f; // CSV 距离暂为 0 时，使用可见的预览距离
     
     
     
@@ -181,7 +182,7 @@ public class StudyManager : MonoBehaviour
         
         
         
-        trialCountPB = 2; // TODO: 按实际情况修改
+        trialCountPB = 32; // Formal_OrderList / Formal_Scene 当前各包含 32 个 trial
         trainingCountPB = 2; // TODO: 按实际情况修改
 
         blockCount = 1; // TODO：按实际情况修改
@@ -428,7 +429,10 @@ public class StudyManager : MonoBehaviour
         // 2. 根据距离和视角夹角计算两个团中心
         // ===============================================================
 
-        float distance = Mathf.Abs(currTrial.Distance);
+        float configuredDistance = Mathf.Abs(currTrial.Distance);
+        float distance = configuredDistance > 0.01f
+            ? configuredDistance
+            : defaultStimulusDistance;
 
         Vector3 datasetCenter = playerPosition.position + forward * distance;
 
@@ -848,8 +852,7 @@ public class StudyManager : MonoBehaviour
         formalConfig.participantCsv = formalConfigPath + "/Formal_Participant.csv";
         formalConfig.orderListCsv = formalConfigPath + "/Formal_OrderList.csv";
         formalConfig.sceneCsv = formalConfigPath + "/Formal_Scene.csv";
-        
-        
+
         resultFolder = Application.persistentDataPath + "/Results";
         if (!Directory.Exists(resultFolder)) { Directory.CreateDirectory(resultFolder); }
        
@@ -895,7 +898,7 @@ public class StudyManager : MonoBehaviour
             if (!loadSuccess) { yield break; }
             yield return LoadTrialInfos(trainingConfig.sceneCsv, trainingTrials);
             if (!loadSuccess) { yield break; }
-            yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials);
+            yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials, false);
             if (!loadSuccess) { yield break; }
         }
         
@@ -918,7 +921,7 @@ public class StudyManager : MonoBehaviour
             if (!loadSuccess) { yield break; }
             yield return LoadTrialInfos(formalConfig.sceneCsv, formalTrials);
             if (!loadSuccess) { yield break; }
-            yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials);
+            yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials, true);
             if (!loadSuccess) { yield break; }
         }
         
@@ -934,7 +937,7 @@ public class StudyManager : MonoBehaviour
         string orderText = "";
 
         // 读取 Participant CSV
-        using (UnityWebRequest request = UnityWebRequest.Get(participantCsv))
+        using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(participantCsv)))
         {
             yield return request.SendWebRequest();
 
@@ -949,7 +952,7 @@ public class StudyManager : MonoBehaviour
         }
 
         // 读取 OrderList CSV
-        using (UnityWebRequest request = UnityWebRequest.Get(orderCsv))
+        using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(orderCsv)))
         {
             yield return request.SendWebRequest();
 
@@ -1081,7 +1084,7 @@ public class StudyManager : MonoBehaviour
         string sceneText = "";
 
         // 读取 Scene CSV
-        using (UnityWebRequest request = UnityWebRequest.Get(sceneCsv))
+        using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(sceneCsv)))
         {
             yield return request.SendWebRequest();
 
@@ -1103,12 +1106,12 @@ public class StudyManager : MonoBehaviour
         // 按表头找列
         string[] sceneHeader = sceneLines[0].Trim().Split(',');
 
+        // Formal_Scene.csv already defines its rows with the existing five columns.
+        // SceneID and RepetitionID remain supported when present, but are optional.
         if (!ValidateColumns(
                 sceneHeader,
                 Path.GetFileName(sceneCsv),
-                "SceneID",
                 "ConditionID",
-                "RepetitionID",
                 "DatasetName",
                 "Distance",
                 "DensityRatio",
@@ -1143,7 +1146,11 @@ public class StudyManager : MonoBehaviour
                     {
                         string[] cells = line.Split(',');
 
-                        int sceneID = int.Parse(cells[sceneIdColumn].Trim());
+                        // Without an explicit SceneID column, the 1-based data-row
+                        // number is the scene ID used by Formal_OrderList.csv.
+                        int sceneID = sceneIdColumn >= 0
+                            ? int.Parse(cells[sceneIdColumn].Trim())
+                            : i;
 
                         if (sceneID == targetSceneID)
                         {
@@ -1151,7 +1158,9 @@ public class StudyManager : MonoBehaviour
 
                             trial.SceneID = sceneID;
                             trial.ConditionID = int.Parse(cells[conditionIdColumn].Trim());
-                            trial.RepetitionID = int.Parse(cells[repetitionIdColumn].Trim());
+                            trial.RepetitionID = repetitionIdColumn >= 0
+                                ? int.Parse(cells[repetitionIdColumn].Trim())
+                                : 0;
                             trial.StimuliName = cells[datasetNameColumn].Trim();
                             trial.Distance = float.Parse(cells[distanceColumn].Trim(), CultureInfo.InvariantCulture);
                             trial.DensityRatio = float.Parse(cells[densityRatioColumn].Trim(), CultureInfo.InvariantCulture);
@@ -1180,31 +1189,71 @@ public class StudyManager : MonoBehaviour
 
 
     // 根据 StimuliName 读取具体的点数据
-    private IEnumerator LoadStimuli(string stimuliFolder, TrialInfo[][] trialInfos)
+    private IEnumerator LoadStimuli(
+        string stimuliFolder,
+        TrialInfo[][] trialInfos,
+        bool allowFormalPreviewFallback)
     {
+        string formalPreviewText = null;
+
         for(int blockIndex =  0; blockIndex < trialInfos.Length; blockIndex++)
         {
             for (int trialIndex = 0; trialIndex < trialInfos[blockIndex].Length; trialIndex++)
             {
                 TrialInfo trial = trialInfos[blockIndex][trialIndex];
 
-                string stimuliPath = stimuliFolder + "/" + trial.StimuliName + ".csv";
+                string stimuliFileName = allowFormalPreviewFallback
+                    ? GetDatasetFileName(trial.StimuliName)
+                    : trial.StimuliName;
+                string stimuliPath = stimuliFolder + "/" + stimuliFileName + ".csv";
                 string stimuliText = "";
 
                 // 读取当前 trial 对应的 stimuli csv
-                using (UnityWebRequest request = UnityWebRequest.Get(stimuliPath))
+                using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(stimuliPath)))
                 {
                     yield return request.SendWebRequest();
 
                     if (request.result != UnityWebRequest.Result.Success)
                     {
-                        // TODO: Log 文档
-                        ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
-                        loadSuccess = false;
-                        yield break;
+                        if (!allowFormalPreviewFallback)
+                        {
+                            ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
+                            loadSuccess = false;
+                            yield break;
+                        }
+                    }
+                    else
+                    {
+                        stimuliText = request.downloadHandler.text;
+                    }
+                }
+
+                // Formal_Scene.csv uses descriptive titles such as
+                // T1_Low_Dataset7_.... The Dataset7 part selects Dataset7.csv while
+                // the complete title remains untouched in TrialInfo. The repository
+                // currently only has Dataset1.csv, so use it for previewing missing
+                // formal datasets until the remaining files arrive.
+                if (string.IsNullOrEmpty(stimuliText) && allowFormalPreviewFallback)
+                {
+                    if (formalPreviewText == null)
+                    {
+                        string previewPath = stimuliFolder + "/Dataset1.csv";
+                        using (UnityWebRequest previewRequest = UnityWebRequest.Get(ToRequestUrl(previewPath)))
+                        {
+                            yield return previewRequest.SendWebRequest();
+
+                            if (previewRequest.result != UnityWebRequest.Result.Success)
+                            {
+                                ShowWarning("Unable to load formal preview stimulus Dataset1.csv.\nPlease check the Formal/Stimuli folder.");
+                                loadSuccess = false;
+                                yield break;
+                            }
+
+                            formalPreviewText = previewRequest.downloadHandler.text;
+                        }
                     }
 
-                    stimuliText = request.downloadHandler.text;
+                    stimuliText = formalPreviewText;
                 }
 
                 string[] lines = stimuliText.Split('\n');
@@ -1258,9 +1307,38 @@ public class StudyManager : MonoBehaviour
             }
         }
     }
-    
-    
+
+    private string GetDatasetFileName(string sceneTitle)
+    {
+        const string marker = "Dataset";
+        int markerIndex = sceneTitle.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+
+        if (markerIndex < 0)
+        {
+            return sceneTitle;
+        }
+
+        int endIndex = markerIndex + marker.Length;
+        while (endIndex < sceneTitle.Length && char.IsDigit(sceneTitle[endIndex]))
+        {
+            endIndex++;
+        }
+
+        return endIndex > markerIndex + marker.Length
+            ? sceneTitle.Substring(markerIndex, endIndex - markerIndex)
+            : sceneTitle;
+    }
+
+
     // Csv 读取工具函数
+    private string ToRequestUrl(string path)
+    {
+        // StreamingAssets is a normal filesystem path in the Editor/desktop build,
+        // but UnityWebRequest requires a file:// URL there. Android already returns
+        // a jar:file:// URL, so leave any existing URL scheme unchanged.
+        return path.Contains("://") ? path : new Uri(path).AbsoluteUri;
+    }
+
     private int FindColumnIndex(string[] header, string columnName)
     {
         for (int i = 0; i < header.Length; i++)

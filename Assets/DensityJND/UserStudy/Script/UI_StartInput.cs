@@ -56,6 +56,11 @@ public class UI_StartInput : MonoBehaviour
             uiController = transform.root.GetComponentInChildren<StudyUIController>(true);
         }
 
+        // Training configuration files are not present yet, so make Formal the
+        // safe default every time the start page is opened in Play mode.
+        trainingToggle?.SetIsOnWithoutNotify(false);
+        formalToggle?.SetIsOnWithoutNotify(true);
+
         ShowMessage("");
         
     }
@@ -84,7 +89,16 @@ public class UI_StartInput : MonoBehaviour
         lastStartAction = StartAction.Study;
         uiController?.BeginLoading();
 
-        studyManager.StartStudy(participantID);
+        // The main Start button must honor the selected phase too. Formal starts
+        // from Block 1 / Trial 1 and never touches the absent Training files.
+        if (formalToggle != null && formalToggle.isOn)
+        {
+            studyManager.StartTrial(participantID, 0, 0, StudyManager.StudyPhase.Formal);
+        }
+        else
+        {
+            studyManager.StartStudy(participantID);
+        }
     }
 
 
@@ -117,13 +131,16 @@ public class UI_StartInput : MonoBehaviour
 
         StudyManager.StudyPhase phase;
 
-        if (trainingToggle != null && trainingToggle.isOn)
-        {
-            phase = StudyManager.StudyPhase.Training;
-        }
-        else if (formalToggle != null && formalToggle.isOn)
+        // Formal takes precedence if a scene/prefab accidentally leaves both toggles on.
+        // The ToggleGroup normally keeps them exclusive, but this prevents a Formal
+        // request from ever falling through to the missing Training configuration.
+        if (formalToggle != null && formalToggle.isOn)
         {
             phase = StudyManager.StudyPhase.Formal;
+        }
+        else if (trainingToggle != null && trainingToggle.isOn)
+        {
+            phase = StudyManager.StudyPhase.Training;
         }
         else
         {
