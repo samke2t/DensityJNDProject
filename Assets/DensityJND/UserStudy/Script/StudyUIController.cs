@@ -93,6 +93,7 @@ public sealed class StudyUIController : MonoBehaviour
         SetOnly(startUI);
         CurrentState = ViewState.Start;
         startInput?.SetInteractable(true);
+        startInput?.ShowMessage("");
     }
 
     public void BeginLoading()
@@ -177,6 +178,12 @@ public sealed class StudyUIController : MonoBehaviour
 
     public void DismissWarning()
     {
+        if (stateBeforeWarning == ViewState.Loading)
+        {
+            ShowStart();
+            return;
+        }
+
         SetActive(warningUI, false);
         CurrentState = stateBeforeWarning;
     }
@@ -193,7 +200,7 @@ public sealed class StudyUIController : MonoBehaviour
 
         if (studyManager.currentPhase == StudyManager.StudyPhase.Idle)
         {
-            startInput?.OnStartStudyClicked();
+            startInput?.RetryLastAction();
         }
         else if (studyManager.currentPhase != StudyManager.StudyPhase.Finished)
         {

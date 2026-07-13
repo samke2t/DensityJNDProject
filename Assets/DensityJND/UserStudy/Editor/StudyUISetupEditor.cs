@@ -14,7 +14,7 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v14";
+    private const string MarkerName = "GeneratedCompleteUI_v17";
     private const string RoundedSpritePath =
         "Assets/Samples/XR Interaction Toolkit/2.5.4/Starter Assets/DemoSceneAssets/Sprites/Round Radius 4.png";
     // Horizon-inspired semantic palette: neutral surfaces, soft text and one restrained action blue.
@@ -284,7 +284,7 @@ public static class StudyUISetupEditor
     {
         GameObject panel = CreatePanel("AnswerPanel", view, Background);
         GameObject card = CreateCard("AnswerCard", panel.transform, Card, new Vector2(1080, 800));
-        const float statusRowY = 300f;
+        const float statusRowY = 330f;
         TMP_Text phase = CreateText("PhaseText", card.transform, "Training", 24, FontStyles.Bold,
             new Vector2(-360, statusRowY), new Vector2(180, 52));
         TMP_Text block = CreateText("BlockText", card.transform, "Block 1", 24, FontStyles.Normal,
@@ -297,30 +297,32 @@ public static class StudyUISetupEditor
             new Vector2(500, statusRowY), new Vector2(60, 52));
 
         CreateText("Question", card.transform, "Which side appears denser?", 42, FontStyles.Bold,
-            new Vector2(0, 155), new Vector2(900, 72));
+            new Vector2(0, 185), new Vector2(900, 72));
 
         Button left = CreateButton("LeftButton", card.transform, "Left", Secondary);
-        SetRect(left.GetComponent<RectTransform>(), new Vector2(-245, 25), new Vector2(410, 126));
+        SetRect(left.GetComponent<RectTransform>(), new Vector2(-245, 55), new Vector2(410, 126));
+        left.GetComponentInChildren<TMP_Text>().fontSize = 32;
         UnityEventTools.AddPersistentListener(left.onClick, inputHandler.OnLeftClicked);
         Button right = CreateButton("RightButton", card.transform, "Right", Secondary);
-        SetRect(right.GetComponent<RectTransform>(), new Vector2(245, 25), new Vector2(410, 126));
+        SetRect(right.GetComponent<RectTransform>(), new Vector2(245, 55), new Vector2(410, 126));
+        right.GetComponentInChildren<TMP_Text>().fontSize = 32;
         UnityEventTools.AddPersistentListener(right.onClick, inputHandler.OnRightClicked);
 
         TMP_Text message = CreateText("AnswerMessage", card.transform, "", 25, FontStyles.Normal,
-            new Vector2(0, -110), new Vector2(900, 52));
+            new Vector2(0, -55), new Vector2(900, 52));
         message.color = Error;
 
         Button submit = CreateButton("SubmitButton", card.transform, "Submit Answer", Primary);
-        SetRect(submit.GetComponent<RectTransform>(), new Vector2(0, -190), new Vector2(340, 72));
+        SetRect(submit.GetComponent<RectTransform>(), new Vector2(0, -130), new Vector2(400, 84));
         UnityEventTools.AddPersistentListener(submit.onClick, inputHandler.OnSubmitClicked);
         Button next = CreateButton("NextButton", card.transform, "Next Training Trial", Secondary);
-        SetRect(next.GetComponent<RectTransform>(), new Vector2(-350, -325), new Vector2(310, 64));
+        SetRect(next.GetComponent<RectTransform>(), new Vector2(-350, -295), new Vector2(310, 64));
         UnityEventTools.AddPersistentListener(next.onClick, inputHandler.OnNextClicked);
         Button again = CreateButton("TrainingAgainButton", card.transform, "Restart Training", Secondary);
-        SetRect(again.GetComponent<RectTransform>(), new Vector2(0, -325), new Vector2(290, 64));
+        SetRect(again.GetComponent<RectTransform>(), new Vector2(0, -295), new Vector2(290, 64));
         UnityEventTools.AddPersistentListener(again.onClick, inputHandler.OnTrainingAgainClicked);
         Button formal = CreateButton("StartFormalButton", card.transform, "Start Formal Study", Primary);
-        SetRect(formal.GetComponent<RectTransform>(), new Vector2(350, -325), new Vector2(310, 64));
+        SetRect(formal.GetComponent<RectTransform>(), new Vector2(350, -295), new Vector2(310, 64));
         UnityEventTools.AddPersistentListener(formal.onClick, inputHandler.OnStartFormalClicked);
 
         // Keep the training actions visible so the layout remains stable. UI_AnswerInput

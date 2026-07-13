@@ -208,7 +208,7 @@ public class StudyManager : MonoBehaviour
     
     public IEnumerator StartStudyRoutine(int participantId)
     {
-        yield return ParticipantInit(participantId);
+        yield return ParticipantInit(participantId, true, false);
         if (!loadSuccess)
         {
             uiController?.SetStartBusy(false);
@@ -218,11 +218,7 @@ public class StudyManager : MonoBehaviour
         // ===============================================================
         // 加载完成后，进入第一个 training trial
         // ===============================================================
-        startUI.SetActive(false);
-        answerUI.SetActive(true);
-        
-        currentBlock = 0;
-        StartTraining();
+        EnterTrial(0, 0, StudyPhase.Training);
     }
     
     
@@ -263,35 +259,46 @@ public class StudyManager : MonoBehaviour
     
     public IEnumerator StartTrialRoutine(int participantId, int blockId, int trialId, StudyPhase phase)
     {
-        yield return ParticipantInit(participantId);
+        yield return ParticipantInit(
+            participantId,
+            phase == StudyPhase.Training,
+            phase == StudyPhase.Formal);
         if (!loadSuccess)
         {
             uiController?.SetStartBusy(false);
             yield break;
         }
-        
+
+        EnterTrial(blockId, trialId, phase);
+    }
+
+    private void EnterTrial(int blockId, int trialId, StudyPhase phase)
+    {
         currentBlock = blockId;
-        
-        startUI.SetActive(false);
-        answerUI.SetActive(true);
+        currentPhase = phase;
 
         if (phase == StudyPhase.Training)
         {
-            currentPhase = StudyPhase.Training;
             currentTrainingTrial = trialId;
             currentTrial = trainingTrials[currentBlock][currentTrainingTrial];
-            
-            SetupTrial(currentTrial);
         }
-        else if (phase == StudyPhase.Formal)
+        else
         {
-            currentPhase = StudyPhase.Formal;
             currentFormalTrial = trialId;
             currentTrial = formalTrials[currentBlock][currentFormalTrial];
-            
-            SetupTrial(currentTrial);
         }
-       
+
+        if (uiController != null)
+        {
+            uiController.ShowAnswering();
+        }
+        else
+        {
+            startUI.SetActive(false);
+            answerUI.SetActive(true);
+        }
+
+        SetupTrial(currentTrial);
     }
     
     
@@ -343,8 +350,27 @@ public class StudyManager : MonoBehaviour
     {
         stimuliRender.ReleaseForReinit();
         //clearEvent.Invoke();
-        
+
+        if (formalTrials == null)
+        {
+            uiController?.BeginLoading();
+            StartCoroutine(StartFormalAfterLoadRoutine());
+            return;
+        }
+
         StartFormal();
+    }
+
+    private IEnumerator StartFormalAfterLoadRoutine()
+    {
+        yield return ParticipantInit(ParticipantID, false, true);
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
+
+        EnterTrial(currentBlock, 0, StudyPhase.Formal);
     }
     
     // 开始训练部分
@@ -839,6 +865,11 @@ public class StudyManager : MonoBehaviour
     // 根据用户 ID 初始化
     public IEnumerator ParticipantInit(int participantId)
     {
+        yield return ParticipantInit(participantId, true, true);
+    }
+
+    private IEnumerator ParticipantInit(int participantId, bool loadTraining, bool loadFormal)
+    {
         //TODO：在startUI中interactable禁掉
         
         ParticipantID = participantId;
@@ -851,19 +882,22 @@ public class StudyManager : MonoBehaviour
         // 初始化 trainingTrials
         // ===============================================================
         
-        trainingTrials = new TrialInfo[blockCount][];
-        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        if (loadTraining)
         {
-            trainingTrials[blockIndex] = new TrialInfo[trainingCountPB];
-        }
+            trainingTrials = new TrialInfo[blockCount][];
+            for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                trainingTrials[blockIndex] = new TrialInfo[trainingCountPB];
+            }
 
-        // 加载对应的 training 信息
-        yield return LoadTrialOrder(participantId, trainingConfig.participantCsv, trainingConfig.orderListCsv, trainingTrials);
-        if (!loadSuccess) { yield break; }
-        yield return LoadTrialInfos(trainingConfig.sceneCsv, trainingTrials);
-        if (!loadSuccess) { yield break; }
-        yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials);
-        if (!loadSuccess) { yield break; }
+            // 加载对应的 training 信息
+            yield return LoadTrialOrder(participantId, trainingConfig.participantCsv, trainingConfig.orderListCsv, trainingTrials);
+            if (!loadSuccess) { yield break; }
+            yield return LoadTrialInfos(trainingConfig.sceneCsv, trainingTrials);
+            if (!loadSuccess) { yield break; }
+            yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials);
+            if (!loadSuccess) { yield break; }
+        }
         
 
 
@@ -871,19 +905,22 @@ public class StudyManager : MonoBehaviour
         // 初始化 formalTrials
         // ===============================================================
 
-        formalTrials = new TrialInfo[blockCount][];
-        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        if (loadFormal)
         {
-            formalTrials[blockIndex] = new TrialInfo[trialCountPB];
-        }
+            formalTrials = new TrialInfo[blockCount][];
+            for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                formalTrials[blockIndex] = new TrialInfo[trialCountPB];
+            }
 
-        // 加载对应的 formal 信息
-        yield return LoadTrialOrder(participantId, formalConfig.participantCsv, formalConfig.orderListCsv, formalTrials);
-        if (!loadSuccess) { yield break; }
-        yield return LoadTrialInfos(formalConfig.sceneCsv, formalTrials);
-        if (!loadSuccess) { yield break; }
-        yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials);
-        if (!loadSuccess) { yield break; }
+            // 加载对应的 formal 信息
+            yield return LoadTrialOrder(participantId, formalConfig.participantCsv, formalConfig.orderListCsv, formalTrials);
+            if (!loadSuccess) { yield break; }
+            yield return LoadTrialInfos(formalConfig.sceneCsv, formalTrials);
+            if (!loadSuccess) { yield break; }
+            yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials);
+            if (!loadSuccess) { yield break; }
+        }
         
         
         
@@ -903,8 +940,7 @@ public class StudyManager : MonoBehaviour
 
             if (request.result != UnityWebRequest.Result.Success)
             {
-                // TODO: Log 文档
-                ShowWarning("Unable to load the participant configuration file.");
+                ShowWarning($"Unable to load {Path.GetFileName(participantCsv)}.\nPlease add the missing configuration file and try again.");
                 loadSuccess = false;
                 yield break;
             }
@@ -919,8 +955,7 @@ public class StudyManager : MonoBehaviour
 
             if (request.result != UnityWebRequest.Result.Success)
             {
-                // TODO: Log 文档
-                ShowWarning("Unable to load the trial order configuration file.");
+                ShowWarning($"Unable to load {Path.GetFileName(orderCsv)}.\nPlease add the missing configuration file and try again.");
                 loadSuccess = false;
                 yield break;
             }
@@ -934,6 +969,11 @@ public class StudyManager : MonoBehaviour
 
         string[] participantLines = participantText.Split('\n');
         string[] participantHeader = participantLines[0].Trim().Split(',');
+
+        if (!ValidateColumns(participantHeader, Path.GetFileName(participantCsv), "ParticipantID"))
+        {
+            yield break;
+        }
 
         int participantIdColumn = FindColumnIndex(participantHeader, "ParticipantID");
 
@@ -959,6 +999,13 @@ public class StudyManager : MonoBehaviour
                     {
                         string blockOrderColumnName = "Block" + blockIndex + "_Order";
                         int blockOrderColumn = FindColumnIndex(participantHeader, blockOrderColumnName);
+
+                        if (blockOrderColumn < 0)
+                        {
+                            ShowWarning($"{Path.GetFileName(participantCsv)} is missing the required column '{blockOrderColumnName}'.");
+                            loadSuccess = false;
+                            yield break;
+                        }
 
                         blockOrders[blockIndex - 1] = int.Parse(cells[blockOrderColumn].Trim());
                     }
@@ -1056,6 +1103,20 @@ public class StudyManager : MonoBehaviour
         // 按表头找列
         string[] sceneHeader = sceneLines[0].Trim().Split(',');
 
+        if (!ValidateColumns(
+                sceneHeader,
+                Path.GetFileName(sceneCsv),
+                "SceneID",
+                "ConditionID",
+                "RepetitionID",
+                "DatasetName",
+                "Distance",
+                "DensityRatio",
+                "CorrectAnswer"))
+        {
+            yield break;
+        }
+
         int sceneIdColumn = FindColumnIndex(sceneHeader, "SceneID");
         int conditionIdColumn = FindColumnIndex(sceneHeader, "ConditionID");
         int repetitionIdColumn = FindColumnIndex(sceneHeader, "RepetitionID");
@@ -1149,6 +1210,11 @@ public class StudyManager : MonoBehaviour
                 string[] lines = stimuliText.Split('\n');
                 string[] header = lines[0].Trim().Split(',');
 
+                if (!ValidateColumns(header, Path.GetFileName(stimuliPath), "x", "y", "z", "label"))
+                {
+                    yield break;
+                }
+
                 int xColumn = FindColumnIndex(header, "x");
                 int yColumn = FindColumnIndex(header, "y");
                 int zColumn = FindColumnIndex(header, "z");
@@ -1206,6 +1272,23 @@ public class StudyManager : MonoBehaviour
         }
 
         return -1;
+    }
+
+    private bool ValidateColumns(string[] header, string fileName, params string[] requiredColumns)
+    {
+        foreach (string columnName in requiredColumns)
+        {
+            if (FindColumnIndex(header, columnName) >= 0)
+            {
+                continue;
+            }
+
+            ShowWarning($"{fileName} is missing the required column '{columnName}'.");
+            loadSuccess = false;
+            return false;
+        }
+
+        return true;
     }
 
     

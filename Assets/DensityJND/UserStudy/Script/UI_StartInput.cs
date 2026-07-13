@@ -4,6 +4,14 @@ using UnityEngine.UI;
 
 public class UI_StartInput : MonoBehaviour
 {
+    private enum StartAction
+    {
+        Study,
+        SpecificTrial
+    }
+
+    private StartAction lastStartAction = StartAction.Study;
+
     #region =============== Inspector Configuration ===============
 
     [Header("Study Manager")]
@@ -73,6 +81,7 @@ public class UI_StartInput : MonoBehaviour
         }
 
         ShowMessage("");
+        lastStartAction = StartAction.Study;
         uiController?.BeginLoading();
 
         studyManager.StartStudy(participantID);
@@ -123,11 +132,24 @@ public class UI_StartInput : MonoBehaviour
         }
 
         ShowMessage("");
+        lastStartAction = StartAction.SpecificTrial;
         uiController?.BeginLoading();
         
        
 
         studyManager.StartTrial(participantID_Input, blockID_Input-1, trialID_Input-1, phase);
+    }
+
+    public void RetryLastAction()
+    {
+        if (lastStartAction == StartAction.SpecificTrial)
+        {
+            OnStartTrialClicked();
+        }
+        else
+        {
+            OnStartStudyClicked();
+        }
     }
 
     public void SetInteractable(bool interactable)
