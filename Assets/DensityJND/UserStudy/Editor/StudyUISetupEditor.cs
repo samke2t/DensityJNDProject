@@ -14,7 +14,7 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v13";
+    private const string MarkerName = "GeneratedCompleteUI_v14";
     private const string RoundedSpritePath =
         "Assets/Samples/XR Interaction Toolkit/2.5.4/Starter Assets/DemoSceneAssets/Sprites/Round Radius 4.png";
     // Horizon-inspired semantic palette: neutral surfaces, soft text and one restrained action blue.
@@ -241,40 +241,40 @@ public static class StudyUISetupEditor
         GameObject panel = CreatePanel("StartPanel", view, Background);
         GameObject card = CreateCard("StartCard", panel.transform, Card, new Vector2(1040, 800));
         CreateText("Title", card.transform, "Density Judgment Study", 48, FontStyles.Bold,
-            new Vector2(0, 240), new Vector2(900, 76));
+            new Vector2(0, 245), new Vector2(900, 76));
         TMP_Text instruction = CreateText("Instruction", card.transform,
             "Enter the participant ID to begin.\nAdvanced Start is for testing and recovery only.", 27,
-            FontStyles.Normal, new Vector2(0, 140), new Vector2(920, 90));
+            FontStyles.Normal, new Vector2(0, 145), new Vector2(920, 90));
         instruction.color = MutedText;
         instruction.lineSpacing = 8f;
 
         TMP_InputField participant = CreateInputField("ParticipantIDInput", card.transform, "Participant ID");
-        SetRect(participant.GetComponent<RectTransform>(), new Vector2(-190, 40), new Vector2(440, 72));
+        SetRect(participant.GetComponent<RectTransform>(), new Vector2(-190, 35), new Vector2(440, 72));
         Button startStudy = CreateButton("StartStudyButton", card.transform, "Start Study", Primary);
-        SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(290, 40), new Vector2(320, 72));
+        SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(290, 35), new Vector2(320, 72));
         UnityEventTools.AddPersistentListener(startStudy.onClick, inputHandler.OnStartStudyClicked);
 
         TMP_Text advancedTitle = CreateText("AdvancedTitle", card.transform, "Advanced start", 22,
-            FontStyles.Bold, new Vector2(0, -50), new Vector2(900, 42));
+            FontStyles.Bold, new Vector2(0, -60), new Vector2(900, 42));
         advancedTitle.color = MutedText;
 
         TMP_InputField block = CreateInputField("BlockIDInput", card.transform, "Block (starts at 1)");
-        SetRect(block.GetComponent<RectTransform>(), new Vector2(-350, -130), new Vector2(280, 64));
+        SetRect(block.GetComponent<RectTransform>(), new Vector2(-350, -145), new Vector2(280, 64));
         TMP_InputField trial = CreateInputField("TrialIDInput", card.transform, "Trial (starts at 1)");
-        SetRect(trial.GetComponent<RectTransform>(), new Vector2(-40, -130), new Vector2(280, 64));
+        SetRect(trial.GetComponent<RectTransform>(), new Vector2(-40, -145), new Vector2(280, 64));
 
         ToggleGroup phaseGroup = card.AddComponent<ToggleGroup>();
         Toggle training = CreateToggle("TrainingToggle", card.transform, "Training", phaseGroup, true);
-        SetRect(training.GetComponent<RectTransform>(), new Vector2(250, -130), new Vector2(190, 56));
+        SetRect(training.GetComponent<RectTransform>(), new Vector2(250, -145), new Vector2(190, 56));
         Toggle formal = CreateToggle("FormalToggle", card.transform, "Formal", phaseGroup, false);
-        SetRect(formal.GetComponent<RectTransform>(), new Vector2(430, -130), new Vector2(170, 56));
+        SetRect(formal.GetComponent<RectTransform>(), new Vector2(430, -145), new Vector2(170, 56));
 
         Button startTrial = CreateButton("StartTrialButton", card.transform, "Start Specific Trial", Secondary);
-        SetRect(startTrial.GetComponent<RectTransform>(), new Vector2(0, -230), new Vector2(380, 68));
+        SetRect(startTrial.GetComponent<RectTransform>(), new Vector2(0, -275), new Vector2(380, 68));
         UnityEventTools.AddPersistentListener(startTrial.onClick, inputHandler.OnStartTrialClicked);
 
         TMP_Text message = CreateText("MessageText", card.transform, "", 25, FontStyles.Normal,
-            new Vector2(0, -305), new Vector2(920, 56));
+            new Vector2(0, -350), new Vector2(920, 56));
         message.color = Error;
 
         return new StartWidgets(participant, block, trial, training, formal, message, startStudy, startTrial);
