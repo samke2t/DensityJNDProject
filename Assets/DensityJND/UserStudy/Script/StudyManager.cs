@@ -35,7 +35,9 @@ public class StudyManager : MonoBehaviour
         public int SceneID;
         public int ConditionID;
         public int RepetitionID;
-        
+        public int SourceLabel;
+        public int SamplingSeed;
+
         public string StimuliName;
         public Vector3[] Stimulus1;
         public Vector3[] Stimulus2;
@@ -840,7 +842,8 @@ public class StudyManager : MonoBehaviour
     {
         string trainingConfigPath = Application.streamingAssetsPath + "/Config" + "/Training";
         trainingConfig = new ConfigInfo();
-        trainingConfig.stimuliFolder = trainingConfigPath+ "/Stimuli";
+        // Training and formal trials are generated from the same available source CSV.
+        trainingConfig.stimuliFolder = Application.streamingAssetsPath + "/Config/Formal/Stimuli";
         trainingConfig.participantCsv = trainingConfigPath+ "/Training_Participant.csv";
         trainingConfig.orderListCsv = trainingConfigPath+ "/Training_OrderList.csv";
         trainingConfig.sceneCsv = trainingConfigPath+ "/Training_Scene.csv";
@@ -1124,6 +1127,8 @@ public class StudyManager : MonoBehaviour
         int conditionIdColumn = FindColumnIndex(sceneHeader, "ConditionID");
         int repetitionIdColumn = FindColumnIndex(sceneHeader, "RepetitionID");
         int datasetNameColumn = FindColumnIndex(sceneHeader, "DatasetName");
+        int sourceLabelColumn = FindColumnIndex(sceneHeader, "SourceLabel");
+        int samplingSeedColumn = FindColumnIndex(sceneHeader, "SamplingSeed");
         int distanceColumn = FindColumnIndex(sceneHeader, "Distance");
         int densityRatioColumn = FindColumnIndex(sceneHeader, "DensityRatio");
         int correctAnswerColumn = FindColumnIndex(sceneHeader, "CorrectAnswer");
@@ -1161,6 +1166,12 @@ public class StudyManager : MonoBehaviour
                             trial.RepetitionID = repetitionIdColumn >= 0
                                 ? int.Parse(cells[repetitionIdColumn].Trim())
                                 : 0;
+                            trial.SourceLabel = sourceLabelColumn >= 0
+                                ? int.Parse(cells[sourceLabelColumn].Trim())
+                                : 1;
+                            trial.SamplingSeed = samplingSeedColumn >= 0
+                                ? int.Parse(cells[samplingSeedColumn].Trim())
+                                : trial.ConditionID;
                             trial.StimuliName = cells[datasetNameColumn].Trim();
                             trial.Distance = float.Parse(cells[distanceColumn].Trim(), CultureInfo.InvariantCulture);
                             trial.DensityRatio = float.Parse(cells[densityRatioColumn].Trim(), CultureInfo.InvariantCulture);
@@ -1194,7 +1205,7 @@ public class StudyManager : MonoBehaviour
         TrialInfo[][] trialInfos,
         bool allowFormalPreviewFallback)
     {
-        string formalPreviewText = null;
+        Dictionary<string, string> stimulusTextCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         for(int blockIndex =  0; blockIndex < trialInfos.Length; blockIndex++)
         {
@@ -1208,23 +1219,28 @@ public class StudyManager : MonoBehaviour
                 string stimuliPath = stimuliFolder + "/" + stimuliFileName + ".csv";
                 string stimuliText = "";
 
-                // 读取当前 trial 对应的 stimuli csv
-                using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(stimuliPath)))
+                // Multiple conditions can share one source dataset. Read it once and
+                // reuse the text while deterministic sampling creates each trial.
+                if (!stimulusTextCache.TryGetValue(stimuliFileName, out stimuliText))
                 {
-                    yield return request.SendWebRequest();
+                    using (UnityWebRequest request = UnityWebRequest.Get(ToRequestUrl(stimuliPath)))
+                    {
+                        yield return request.SendWebRequest();
 
-                    if (request.result != UnityWebRequest.Result.Success)
-                    {
-                        if (!allowFormalPreviewFallback)
+                        if (request.result != UnityWebRequest.Result.Success)
                         {
-                            ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
-                            loadSuccess = false;
-                            yield break;
+                            if (!allowFormalPreviewFallback)
+                            {
+                                ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
+                                loadSuccess = false;
+                                yield break;
+                            }
                         }
-                    }
-                    else
-                    {
-                        stimuliText = request.downloadHandler.text;
+                        else
+                        {
+                            stimuliText = request.downloadHandler.text;
+                            stimulusTextCache[stimuliFileName] = stimuliText;
+                        }
                     }
                 }
 
@@ -1235,9 +1251,10 @@ public class StudyManager : MonoBehaviour
                 // formal datasets until the remaining files arrive.
                 if (string.IsNullOrEmpty(stimuliText) && allowFormalPreviewFallback)
                 {
-                    if (formalPreviewText == null)
+                    const string previewFileName = "Dataset1";
+                    if (!stimulusTextCache.TryGetValue(previewFileName, out stimuliText))
                     {
-                        string previewPath = stimuliFolder + "/Dataset1.csv";
+                        string previewPath = stimuliFolder + "/" + previewFileName + ".csv";
                         using (UnityWebRequest previewRequest = UnityWebRequest.Get(ToRequestUrl(previewPath)))
                         {
                             yield return previewRequest.SendWebRequest();
@@ -1249,11 +1266,10 @@ public class StudyManager : MonoBehaviour
                                 yield break;
                             }
 
-                            formalPreviewText = previewRequest.downloadHandler.text;
+                            stimuliText = previewRequest.downloadHandler.text;
+                            stimulusTextCache[previewFileName] = stimuliText;
                         }
                     }
-
-                    stimuliText = formalPreviewText;
                 }
 
                 string[] lines = stimuliText.Split('\n');
@@ -1269,8 +1285,7 @@ public class StudyManager : MonoBehaviour
                 int zColumn = FindColumnIndex(header, "z");
                 int labelColumn = FindColumnIndex(header, "label");
 
-                List<Vector3> stimulus1 = new List<Vector3>();
-                List<Vector3> stimulus2 = new List<Vector3>();
+                Dictionary<int, List<Vector3>> pointsByLabel = new Dictionary<int, List<Vector3>>();
 
                 for (int i = 1; i < lines.Length; i++)
                 {
@@ -1290,22 +1305,96 @@ public class StudyManager : MonoBehaviour
 
                     Vector3 point = new Vector3(x, y, z);
 
-                    if (label == 1)
+                    if (!pointsByLabel.TryGetValue(label, out List<Vector3> labelPoints))
                     {
-                        stimulus1.Add(point);
+                        labelPoints = new List<Vector3>();
+                        pointsByLabel.Add(label, labelPoints);
                     }
-                    else if (label == 2)
-                    {
-                        stimulus2.Add(point);
-                    }
+
+                    labelPoints.Add(point);
                 }
 
-                trial.Stimulus1 = stimulus1.ToArray();
-                trial.Stimulus2 = stimulus2.ToArray();
+                if (trial.SourceLabel > 0)
+                {
+                    if (!pointsByLabel.TryGetValue(trial.SourceLabel, out List<Vector3> sourcePoints) ||
+                        sourcePoints.Count == 0)
+                    {
+                        ShowWarning($"{stimuliFileName}.csv does not contain label {trial.SourceLabel} for condition {trial.ConditionID}.");
+                        loadSuccess = false;
+                        yield break;
+                    }
+
+                    Vector3[] denseStimulus = sourcePoints.ToArray();
+                    Vector3[] sparseStimulus = CreateDensitySubset(
+                        denseStimulus,
+                        trial.DensityRatio,
+                        trial.SamplingSeed);
+
+                    if (trial.CorrectAnswer == 1)
+                    {
+                        trial.Stimulus1 = denseStimulus;
+                        trial.Stimulus2 = sparseStimulus;
+                    }
+                    else if (trial.CorrectAnswer == 2)
+                    {
+                        trial.Stimulus1 = sparseStimulus;
+                        trial.Stimulus2 = denseStimulus;
+                    }
+                    else
+                    {
+                        ShowWarning($"Condition {trial.ConditionID} has an invalid CorrectAnswer. Use 1 for Left or 2 for Right.");
+                        loadSuccess = false;
+                        yield break;
+                    }
+                }
+                else
+                {
+                    if (!pointsByLabel.TryGetValue(1, out List<Vector3> stimulus1) ||
+                        !pointsByLabel.TryGetValue(2, out List<Vector3> stimulus2))
+                    {
+                        ShowWarning("Training stimulus data must contain labels 1 and 2.");
+                        loadSuccess = false;
+                        yield break;
+                    }
+
+                    trial.Stimulus1 = stimulus1.ToArray();
+                    trial.Stimulus2 = stimulus2.ToArray();
+                }
 
                 trialInfos[blockIndex][trialIndex] = trial;
             }
         }
+    }
+
+    private Vector3[] CreateDensitySubset(Vector3[] source, float densityDifference, int seed)
+    {
+        float clampedDifference = Mathf.Clamp01(densityDifference);
+        int keepCount = Mathf.Clamp(
+            Mathf.RoundToInt(source.Length * (1f - clampedDifference)),
+            1,
+            source.Length);
+
+        int[] indices = new int[source.Length];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            indices[i] = i;
+        }
+
+        System.Random random = new System.Random(seed);
+        Vector3[] subset = new Vector3[keepCount];
+
+        // Partial Fisher-Yates shuffle: deterministic for a condition while avoiding
+        // a spatial bias from simply taking the first rows of the CSV.
+        for (int i = 0; i < keepCount; i++)
+        {
+            int swapIndex = random.Next(i, indices.Length);
+            int temp = indices[i];
+            indices[i] = indices[swapIndex];
+            indices[swapIndex] = temp;
+            subset[i] = source[indices[i]];
+        }
+
+        return subset;
     }
 
     private string GetDatasetFileName(string sceneTitle)

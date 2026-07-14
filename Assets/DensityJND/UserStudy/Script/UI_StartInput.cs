@@ -1,5 +1,6 @@
-﻿using TMPro;
+using TMPro;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 public class UI_StartInput : MonoBehaviour
@@ -18,28 +19,28 @@ public class UI_StartInput : MonoBehaviour
     [SerializeField] private StudyManager studyManager;
     [SerializeField] private StudyUIController uiController;
 
-
     [Header("Participant Input")]
     [SerializeField] private TMP_InputField participantIDInput;
 
+    [Tooltip("Maximum number of digits accepted by the VR numeric keypad.")]
+    [SerializeField] private int maxNumericCharacters = 6;
 
     [Header("Specific Trial Input")]
+    [Tooltip("Show the optional Block and Trial index fields for researcher recovery workflows.")]
+    [SerializeField] private bool showAdvancedStart = false;
     [SerializeField] private TMP_InputField blockIDInput;
     [SerializeField] private TMP_InputField trialIDInput;
-    
-    // 用于选择阶段，可改, GPT 建议给这两个Toggle 设置同一个 ToggleGroup，实现二选一
+
     [SerializeField] private Toggle trainingToggle;
     [SerializeField] private Toggle formalToggle;
-    
-
 
     [Header("Message Text")]
     [SerializeField] private TMP_Text messageText;
     [SerializeField] private Button startStudyButton;
-    [SerializeField] private Button startTrialButton;
+
+    private TMP_InputField activeNumericInput;
 
     #endregion ====================================================
-
 
     #region =============== Unity Lifecycle =======================
 
@@ -47,7 +48,6 @@ public class UI_StartInput : MonoBehaviour
     {
         if (studyManager == null)
         {
-            // TODO：根据最终的对象层级调整获取方式
             studyManager = transform.parent.GetComponentInChildren<StudyManager>();
         }
 
@@ -60,17 +60,27 @@ public class UI_StartInput : MonoBehaviour
         // safe default every time the start page is opened in Play mode.
         trainingToggle?.SetIsOnWithoutNotify(false);
         formalToggle?.SetIsOnWithoutNotify(true);
+        SetAdvancedStartVisible(showAdvancedStart);
+
+        ConfigureNumericInput(participantIDInput, SelectParticipantInput);
+        ConfigureNumericInput(blockIDInput, SelectBlockInput);
+        ConfigureNumericInput(trialIDInput, SelectTrialInput);
+        activeNumericInput = participantIDInput;
 
         ShowMessage("");
-        
+    }
+
+    private void OnDestroy()
+    {
+        RemoveInputListener(participantIDInput, SelectParticipantInput);
+        RemoveInputListener(blockIDInput, SelectBlockInput);
+        RemoveInputListener(trialIDInput, SelectTrialInput);
     }
 
     #endregion ====================================================
 
-
     #region =============== Start Input ===========================
 
-    // Start 按钮调用：正常开始整个实验
     public void OnStartStudyClicked()
     {
         if (studyManager == null)
@@ -79,7 +89,9 @@ public class UI_StartInput : MonoBehaviour
             return;
         }
 
-        if (participantIDInput == null || !int.TryParse(participantIDInput.text, out int participantID) || participantID < 0)
+        if (participantIDInput == null ||
+            !int.TryParse(participantIDInput.text, out int participantID) ||
+            participantID < 0)
         {
             ShowMessage("Please enter a valid participant ID (0 or greater).");
             return;
@@ -87,10 +99,11 @@ public class UI_StartInput : MonoBehaviour
 
         ShowMessage("");
         lastStartAction = StartAction.Study;
+        Debug.Log($"[DensityJND] Start Study requested for participant {participantID}.");
         uiController?.BeginLoading();
 
-        // The main Start button must honor the selected phase too. Formal starts
-        // from Block 1 / Trial 1 and never touches the absent Training files.
+        // The main Start button honors the selected phase. Formal starts from
+        // Block 1 / Trial 1 and never touches the absent Training files.
         if (formalToggle != null && formalToggle.isOn)
         {
             studyManager.StartTrial(participantID, 0, 0, StudyManager.StudyPhase.Formal);
@@ -101,8 +114,6 @@ public class UI_StartInput : MonoBehaviour
         }
     }
 
-
-    // Start Trial 按钮调用：从指定 Trial 开始
     public void OnStartTrialClicked()
     {
         if (studyManager == null)
@@ -111,19 +122,25 @@ public class UI_StartInput : MonoBehaviour
             return;
         }
 
-        if (participantIDInput == null || !int.TryParse(participantIDInput.text, out int participantID_Input) || participantID_Input < 0)
+        if (participantIDInput == null ||
+            !int.TryParse(participantIDInput.text, out int participantID) ||
+            participantID < 0)
         {
             ShowMessage("Please enter a valid participant ID (0 or greater).");
             return;
         }
 
-        if (blockIDInput == null || !int.TryParse(blockIDInput.text, out int blockID_Input) || blockID_Input < 1)
+        int blockID = 1;
+        if (blockIDInput != null && blockIDInput.gameObject.activeInHierarchy &&
+            (!int.TryParse(blockIDInput.text, out blockID) || blockID < 1))
         {
             ShowMessage("Block number must start at 1.");
             return;
         }
 
-        if (trialIDInput == null || !int.TryParse(trialIDInput.text, out int trialID_Input) || trialID_Input < 1)
+        int trialID = 1;
+        if (trialIDInput != null && trialIDInput.gameObject.activeInHierarchy &&
+            (!int.TryParse(trialIDInput.text, out trialID) || trialID < 1))
         {
             ShowMessage("Trial number must start at 1.");
             return;
@@ -132,8 +149,6 @@ public class UI_StartInput : MonoBehaviour
         StudyManager.StudyPhase phase;
 
         // Formal takes precedence if a scene/prefab accidentally leaves both toggles on.
-        // The ToggleGroup normally keeps them exclusive, but this prevents a Formal
-        // request from ever falling through to the missing Training configuration.
         if (formalToggle != null && formalToggle.isOn)
         {
             phase = StudyManager.StudyPhase.Formal;
@@ -150,11 +165,12 @@ public class UI_StartInput : MonoBehaviour
 
         ShowMessage("");
         lastStartAction = StartAction.SpecificTrial;
+        Debug.Log(
+            $"[DensityJND] Start Trial requested: participant {participantID}, " +
+            $"block {blockID}, trial {trialID}, phase {phase}.");
         uiController?.BeginLoading();
-        
-       
 
-        studyManager.StartTrial(participantID_Input, blockID_Input-1, trialID_Input-1, phase);
+        studyManager.StartTrial(participantID, blockID - 1, trialID - 1, phase);
     }
 
     public void RetryLastAction()
@@ -169,6 +185,56 @@ public class UI_StartInput : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Called by the world-space keypad. This avoids TouchScreenKeyboard entirely,
+    /// which is unreliable for TMP input fields in Quest standalone builds.
+    /// </summary>
+    public void AppendDigit(string digit)
+    {
+        if (activeNumericInput == null || !activeNumericInput.interactable ||
+            string.IsNullOrEmpty(digit) || digit.Length != 1 || !char.IsDigit(digit[0]))
+        {
+            return;
+        }
+
+        int characterLimit = activeNumericInput.characterLimit > 0
+            ? activeNumericInput.characterLimit
+            : maxNumericCharacters;
+        if (activeNumericInput.text.Length >= characterLimit)
+        {
+            ShowMessage($"Use at most {characterLimit} digits.");
+            return;
+        }
+
+        activeNumericInput.text += digit;
+        activeNumericInput.caretPosition = activeNumericInput.text.Length;
+        ShowMessage("");
+    }
+
+    public void BackspaceNumericInput()
+    {
+        if (activeNumericInput == null || !activeNumericInput.interactable ||
+            string.IsNullOrEmpty(activeNumericInput.text))
+        {
+            return;
+        }
+
+        activeNumericInput.text = activeNumericInput.text.Substring(0, activeNumericInput.text.Length - 1);
+        activeNumericInput.caretPosition = activeNumericInput.text.Length;
+        ShowMessage("");
+    }
+
+    public void ClearNumericInput()
+    {
+        if (activeNumericInput == null || !activeNumericInput.interactable)
+        {
+            return;
+        }
+
+        activeNumericInput.text = "";
+        ShowMessage("");
+    }
+
     public void SetInteractable(bool interactable)
     {
         if (participantIDInput != null) participantIDInput.interactable = interactable;
@@ -177,7 +243,6 @@ public class UI_StartInput : MonoBehaviour
         if (trainingToggle != null) trainingToggle.interactable = interactable;
         if (formalToggle != null) formalToggle.interactable = interactable;
         if (startStudyButton != null) startStudyButton.interactable = interactable;
-        if (startTrialButton != null) startTrialButton.interactable = interactable;
     }
 
     public void ShowMessage(string message)
@@ -186,6 +251,45 @@ public class UI_StartInput : MonoBehaviour
         {
             messageText.text = message;
         }
+    }
+
+    private void ConfigureNumericInput(TMP_InputField input, UnityAction<string> onSelected)
+    {
+        if (input == null)
+        {
+            return;
+        }
+
+        input.contentType = TMP_InputField.ContentType.IntegerNumber;
+        input.lineType = TMP_InputField.LineType.SingleLine;
+        input.characterLimit = Mathf.Max(1, maxNumericCharacters);
+
+        // Quest reports itself as Android. Suppressing TMP's soft keyboard prevents
+        // TouchScreenKeyboard.Open from reaching the unsupported phone IME path.
+        input.shouldHideSoftKeyboard = true;
+        input.onSelect.RemoveListener(onSelected);
+        input.onSelect.AddListener(onSelected);
+    }
+
+    private static void RemoveInputListener(TMP_InputField input, UnityAction<string> onSelected)
+    {
+        input?.onSelect.RemoveListener(onSelected);
+    }
+
+    private void SelectParticipantInput(string unused) => activeNumericInput = participantIDInput;
+    private void SelectBlockInput(string unused) => activeNumericInput = blockIDInput;
+    private void SelectTrialInput(string unused) => activeNumericInput = trialIDInput;
+
+    private void SetAdvancedStartVisible(bool visible)
+    {
+        if (participantIDInput != null)
+        {
+            Transform advancedTitle = participantIDInput.transform.parent?.Find("AdvancedTitle");
+            if (advancedTitle != null) advancedTitle.gameObject.SetActive(visible);
+        }
+
+        if (blockIDInput != null) blockIDInput.gameObject.SetActive(visible);
+        if (trialIDInput != null) trialIDInput.gameObject.SetActive(visible);
     }
 
     #endregion ====================================================

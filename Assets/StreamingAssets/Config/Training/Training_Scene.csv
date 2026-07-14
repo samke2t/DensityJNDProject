@@ -1,0 +1,3 @@
+ConditionID,DatasetName,SourceLabel,SamplingSeed,Distance,DensityRatio,CorrectAnswer
+1,Dataset1,1,1001,0,0.30,1
+2,Dataset1,5,1002,0,0.10,2

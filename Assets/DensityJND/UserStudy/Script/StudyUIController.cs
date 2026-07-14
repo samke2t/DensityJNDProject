@@ -234,7 +234,18 @@ public sealed class StudyUIController : MonoBehaviour
 
         if (type == LogType.Exception || type == LogType.Error)
         {
-            ShowWarning("An unexpected error occurred. Please check the Console before continuing.", false);
+            string firstLine = string.IsNullOrWhiteSpace(condition)
+                ? "No error details were provided."
+                : condition.Split('\n')[0].Trim();
+            if (firstLine.Length > 180)
+            {
+                firstLine = firstLine.Substring(0, 177) + "...";
+            }
+
+            ShowWarning(
+                "An unexpected error occurred:\n" + firstLine +
+                "\n\nCheck the Android log for the full stack trace.",
+                false);
         }
     }
 }

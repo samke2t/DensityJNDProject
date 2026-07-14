@@ -14,7 +14,7 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v17";
+    private const string MarkerName = "GeneratedCompleteUI_v33";
     private const string RoundedSpritePath =
         "Assets/Samples/XR Interaction Toolkit/2.5.4/Starter Assets/DemoSceneAssets/Sprites/Round Radius 4.png";
     // Horizon-inspired semantic palette: neutral surfaces, soft text and one restrained action blue.
@@ -241,43 +241,78 @@ public static class StudyUISetupEditor
         GameObject panel = CreatePanel("StartPanel", view, Background);
         GameObject card = CreateCard("StartCard", panel.transform, Card, new Vector2(1040, 800));
         CreateText("Title", card.transform, "Density Judgment Study", 48, FontStyles.Bold,
-            new Vector2(0, 245), new Vector2(900, 76));
+            new Vector2(0, 270), new Vector2(900, 70));
         TMP_Text instruction = CreateText("Instruction", card.transform,
-            "Enter the participant ID to begin.\nAdvanced Start is for testing and recovery only.", 27,
-            FontStyles.Normal, new Vector2(0, 145), new Vector2(920, 90));
+            "Select a field, then enter numbers with the VR keypad.", 25,
+            FontStyles.Normal, new Vector2(0, 205), new Vector2(920, 55));
         instruction.color = MutedText;
-        instruction.lineSpacing = 8f;
 
         TMP_InputField participant = CreateInputField("ParticipantIDInput", card.transform, "Participant ID");
-        SetRect(participant.GetComponent<RectTransform>(), new Vector2(-190, 35), new Vector2(440, 72));
+        SetRect(participant.GetComponent<RectTransform>(), new Vector2(-255, 50), new Vector2(420, 72));
         Button startStudy = CreateButton("StartStudyButton", card.transform, "Start Study", Primary);
-        SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(290, 35), new Vector2(320, 72));
+        SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(-255, -50), new Vector2(420, 72));
         UnityEventTools.AddPersistentListener(startStudy.onClick, inputHandler.OnStartStudyClicked);
 
         TMP_Text advancedTitle = CreateText("AdvancedTitle", card.transform, "Advanced start", 22,
-            FontStyles.Bold, new Vector2(0, -60), new Vector2(900, 42));
+            FontStyles.Bold, new Vector2(-255, -25), new Vector2(420, 42));
         advancedTitle.color = MutedText;
 
         TMP_InputField block = CreateInputField("BlockIDInput", card.transform, "Block (starts at 1)");
-        SetRect(block.GetComponent<RectTransform>(), new Vector2(-350, -145), new Vector2(280, 64));
+        SetRect(block.GetComponent<RectTransform>(), new Vector2(-385, -95), new Vector2(240, 62));
         TMP_InputField trial = CreateInputField("TrialIDInput", card.transform, "Trial (starts at 1)");
-        SetRect(trial.GetComponent<RectTransform>(), new Vector2(-40, -145), new Vector2(280, 64));
+        SetRect(trial.GetComponent<RectTransform>(), new Vector2(-125, -95), new Vector2(240, 62));
 
         ToggleGroup phaseGroup = card.AddComponent<ToggleGroup>();
-        Toggle training = CreateToggle("TrainingToggle", card.transform, "Training", phaseGroup, true);
-        SetRect(training.GetComponent<RectTransform>(), new Vector2(250, -145), new Vector2(190, 56));
-        Toggle formal = CreateToggle("FormalToggle", card.transform, "Formal", phaseGroup, false);
-        SetRect(formal.GetComponent<RectTransform>(), new Vector2(430, -145), new Vector2(170, 56));
+        phaseGroup.allowSwitchOff = false;
+        CreateText("PhaseSelectorLabel", card.transform, "Study mode", 20, FontStyles.Bold,
+            new Vector2(-255, -165), new Vector2(420, 30)).color = MutedText;
+        Toggle training = CreateToggle("TrainingToggle", card.transform, "Training", phaseGroup, false);
+        SetRect(training.GetComponent<RectTransform>(), new Vector2(-365, -235), new Vector2(200, 68));
+        Toggle formal = CreateToggle("FormalToggle", card.transform, "Formal", phaseGroup, true);
+        SetRect(formal.GetComponent<RectTransform>(), new Vector2(-145, -235), new Vector2(200, 68));
 
-        Button startTrial = CreateButton("StartTrialButton", card.transform, "Start Specific Trial", Secondary);
-        SetRect(startTrial.GetComponent<RectTransform>(), new Vector2(0, -275), new Vector2(380, 68));
-        UnityEventTools.AddPersistentListener(startTrial.onClick, inputHandler.OnStartTrialClicked);
+        advancedTitle.gameObject.SetActive(false);
+        block.gameObject.SetActive(false);
+        trial.gameObject.SetActive(false);
 
         TMP_Text message = CreateText("MessageText", card.transform, "", 25, FontStyles.Normal,
-            new Vector2(0, -350), new Vector2(920, 56));
+            new Vector2(-255, -345), new Vector2(450, 80));
         message.color = Error;
 
-        return new StartWidgets(participant, block, trial, training, formal, message, startStudy, startTrial);
+        CreateText("KeypadTitle", card.transform, "VR numeric keypad", 22, FontStyles.Bold,
+            new Vector2(270, 105), new Vector2(380, 42)).color = MutedText;
+
+        string[,] keys =
+        {
+            { "1", "2", "3" },
+            { "4", "5", "6" },
+            { "7", "8", "9" }
+        };
+        for (int row = 0; row < 3; row++)
+        {
+            for (int column = 0; column < 3; column++)
+            {
+                string digit = keys[row, column];
+                Button key = CreateButton("Key" + digit, card.transform, digit, Secondary);
+                SetRect(key.GetComponent<RectTransform>(),
+                    new Vector2(150 + column * 120, 25 - row * 92), new Vector2(100, 72));
+                UnityEventTools.AddStringPersistentListener(key.onClick, inputHandler.AppendDigit, digit);
+            }
+        }
+
+        Button clear = CreateButton("KeyClear", card.transform, "Clear", Secondary);
+        SetRect(clear.GetComponent<RectTransform>(), new Vector2(150, -251), new Vector2(100, 72));
+        UnityEventTools.AddPersistentListener(clear.onClick, inputHandler.ClearNumericInput);
+
+        Button zero = CreateButton("Key0", card.transform, "0", Secondary);
+        SetRect(zero.GetComponent<RectTransform>(), new Vector2(270, -251), new Vector2(100, 72));
+        UnityEventTools.AddStringPersistentListener(zero.onClick, inputHandler.AppendDigit, "0");
+
+        Button back = CreateButton("KeyBackspace", card.transform, "Back", Secondary);
+        SetRect(back.GetComponent<RectTransform>(), new Vector2(390, -251), new Vector2(100, 72));
+        UnityEventTools.AddPersistentListener(back.onClick, inputHandler.BackspaceNumericInput);
+
+        return new StartWidgets(participant, block, trial, training, formal, message, startStudy);
     }
 
     private static AnswerWidgets BuildAnswerView(Transform view, UI_AnswerInput inputHandler)
@@ -313,7 +348,8 @@ public static class StudyUISetupEditor
         message.color = Error;
 
         Button submit = CreateButton("SubmitButton", card.transform, "Submit Answer", Primary);
-        SetRect(submit.GetComponent<RectTransform>(), new Vector2(0, -130), new Vector2(400, 84));
+        SetRect(submit.GetComponent<RectTransform>(), new Vector2(0, -130), new Vector2(400, 108));
+        submit.GetComponentInChildren<TMP_Text>().fontSize = 32;
         UnityEventTools.AddPersistentListener(submit.onClick, inputHandler.OnSubmitClicked);
         Button next = CreateButton("NextButton", card.transform, "Next Training Trial", Secondary);
         SetRect(next.GetComponent<RectTransform>(), new Vector2(-350, -295), new Vector2(310, 64));
@@ -325,11 +361,11 @@ public static class StudyUISetupEditor
         SetRect(formal.GetComponent<RectTransform>(), new Vector2(350, -295), new Vector2(310, 64));
         UnityEventTools.AddPersistentListener(formal.onClick, inputHandler.OnStartFormalClicked);
 
-        // Keep the training actions visible so the layout remains stable. UI_AnswerInput
-        // controls which action is interactable for the current training state.
+        // Keep the training actions visible so the layout remains stable. Starting the
+        // formal study is always available; the other actions follow training progress.
         next.interactable = false;
         again.interactable = false;
-        formal.interactable = false;
+        formal.interactable = true;
 
         return new AnswerWidgets(phase, block, trial, countdown, message, left, right, submit, next, again, formal);
     }
@@ -391,13 +427,14 @@ public static class StudyUISetupEditor
         SetObject(serialized, "studyManager", manager);
         SetObject(serialized, "uiController", controller);
         SetObject(serialized, "participantIDInput", widgets.Participant);
+        SerializedProperty showAdvancedStart = serialized.FindProperty("showAdvancedStart");
+        if (showAdvancedStart != null) showAdvancedStart.boolValue = false;
         SetObject(serialized, "blockIDInput", widgets.Block);
         SetObject(serialized, "trialIDInput", widgets.Trial);
         SetObject(serialized, "trainingToggle", widgets.Training);
         SetObject(serialized, "formalToggle", widgets.Formal);
         SetObject(serialized, "messageText", widgets.Message);
         SetObject(serialized, "startStudyButton", widgets.StartStudy);
-        SetObject(serialized, "startTrialButton", widgets.StartTrial);
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
@@ -585,6 +622,8 @@ public static class StudyUISetupEditor
         TMP_InputField input = root.AddComponent<TMP_InputField>();
         input.contentType = TMP_InputField.ContentType.IntegerNumber;
         input.lineType = TMP_InputField.LineType.SingleLine;
+        input.characterLimit = 6;
+        input.shouldHideSoftKeyboard = true;
 
         GameObject viewport = CreateUIObject("Text Area", root.transform);
         RectTransform viewportRect = viewport.GetComponent<RectTransform>();
@@ -598,6 +637,7 @@ public static class StudyUISetupEditor
             placeholderValue, 24, FontStyles.Italic, Vector2.zero, Vector2.zero);
         placeholder.color = MutedText;
         placeholder.alignment = TextAlignmentOptions.MidlineLeft;
+        placeholder.enableWordWrapping = false;
         Stretch(placeholder.rectTransform);
 
         TextMeshProUGUI valueText = (TextMeshProUGUI)CreateText("Text", viewport.transform, "", 28,
@@ -641,23 +681,36 @@ public static class StudyUISetupEditor
         Toggle toggle = root.AddComponent<Toggle>();
         toggle.group = group;
 
-        GameObject boxObject = CreateUIObject("Background", root.transform);
-        Image box = boxObject.AddComponent<Image>();
-        box.color = InputSurface;
-        ApplyRoundedSprite(box);
-        SetRect(box.rectTransform, new Vector2(-65, 0), new Vector2(34, 34));
-        GameObject checkObject = CreateUIObject("Checkmark", boxObject.transform);
-        Image check = checkObject.AddComponent<Image>();
-        check.color = Primary;
-        Stretch(check.rectTransform);
-        check.rectTransform.offsetMin = new Vector2(6, 6);
-        check.rectTransform.offsetMax = new Vector2(-6, -6);
-        toggle.targetGraphic = box;
-        toggle.graphic = check;
+        GameObject backgroundObject = CreateUIObject("Background", root.transform);
+        Image background = backgroundObject.AddComponent<Image>();
+        background.color = Color.white;
+        ApplyRoundedSprite(background);
+        Stretch(background.rectTransform);
 
-        TMP_Text text = CreateText("Label", root.transform, label, 24, FontStyles.Normal,
-            new Vector2(25, 0), new Vector2(120, 45));
-        text.alignment = TextAlignmentOptions.MidlineLeft;
+        ColorBlock colors = toggle.colors;
+        colors.normalColor = Secondary;
+        colors.highlightedColor = Color.Lerp(Secondary, Color.white, 0.12f);
+        colors.selectedColor = colors.highlightedColor;
+        colors.pressedColor = Color.Lerp(Secondary, Color.black, 0.18f);
+        colors.disabledColor = new Color(Secondary.r, Secondary.g, Secondary.b, 0.35f);
+        colors.colorMultiplier = 1f;
+        toggle.colors = colors;
+
+        GameObject selectionObject = CreateUIObject("Selection", root.transform);
+        Image selection = selectionObject.AddComponent<Image>();
+        selection.color = Primary;
+        ApplyRoundedSprite(selection);
+        Stretch(selection.rectTransform);
+        selection.rectTransform.offsetMin = new Vector2(3, 3);
+        selection.rectTransform.offsetMax = new Vector2(-3, -3);
+        toggle.targetGraphic = background;
+        toggle.graphic = selection;
+
+        TMP_Text text = CreateText("Label", root.transform, label, 24, FontStyles.Bold,
+            Vector2.zero, Vector2.zero);
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
+        Stretch(text.rectTransform);
         toggle.SetIsOnWithoutNotify(isOn);
         return toggle;
     }
@@ -809,12 +862,12 @@ public static class StudyUISetupEditor
         public readonly TMP_InputField Participant, Block, Trial;
         public readonly Toggle Training, Formal;
         public readonly TMP_Text Message;
-        public readonly Button StartStudy, StartTrial;
+        public readonly Button StartStudy;
         public StartWidgets(TMP_InputField participant, TMP_InputField block, TMP_InputField trial, Toggle training,
-            Toggle formal, TMP_Text message, Button startStudy, Button startTrial)
+            Toggle formal, TMP_Text message, Button startStudy)
         {
             Participant = participant; Block = block; Trial = trial; Training = training; Formal = formal;
-            Message = message; StartStudy = startStudy; StartTrial = startTrial;
+            Message = message; StartStudy = startStudy;
         }
     }
 

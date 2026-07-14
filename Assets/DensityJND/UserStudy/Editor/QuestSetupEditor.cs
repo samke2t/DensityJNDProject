@@ -166,6 +166,13 @@ public static class QuestSetupEditor
         }
 
         Camera xrCamera = existing.GetComponentInChildren<Camera>(true);
+        if (xrCamera != null)
+        {
+            xrCamera.clearFlags = CameraClearFlags.SolidColor;
+            xrCamera.backgroundColor = Color.black;
+            EditorUtility.SetDirty(xrCamera);
+        }
+
         Camera oldCamera = Resources.FindObjectsOfTypeAll<Camera>()
             .FirstOrDefault(item => item != xrCamera && item.gameObject.scene.IsValid() && item.gameObject.name == "Main Camera");
         if (oldCamera != null && xrCamera != null)

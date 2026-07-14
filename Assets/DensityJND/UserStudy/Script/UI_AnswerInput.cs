@@ -72,7 +72,7 @@ public class UI_AnswerInput : MonoBehaviour
         {
             SetButtonState(nextButton, true, false);
             SetButtonState(trainingAgainButton, true, false);
-            SetButtonState(startFormalButton, true, false);
+            SetButtonState(startFormalButton, true, true);
         }
         else
         {
@@ -181,7 +181,7 @@ public class UI_AnswerInput : MonoBehaviour
             bool isLastTrial = studyManager.IsLastTrainingTrial;
             SetButtonState(nextButton, true, !isLastTrial);
             SetButtonState(trainingAgainButton, true, isLastTrial);
-            SetButtonState(startFormalButton, true, isLastTrial);
+            SetButtonState(startFormalButton, true, true);
         }
     }
 
@@ -194,7 +194,7 @@ public class UI_AnswerInput : MonoBehaviour
     public void OnTrainingAgainClicked()
     {
         SetButtonState(trainingAgainButton, true, false);
-        SetButtonState(startFormalButton, true, false);
+        SetButtonState(startFormalButton, true, true);
         studyManager.RestartTraining();
     }
 
