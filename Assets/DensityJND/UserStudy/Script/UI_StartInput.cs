@@ -5,10 +5,14 @@ using UnityEngine.UI;
 
 public class UI_StartInput : MonoBehaviour
 {
+    private const int MinimumParticipantId = 1;
+    private const int MaximumParticipantId = 20;
+
     private enum StartAction
     {
         Study,
-        SpecificTrial
+        DeveloperResume,
+        DeveloperRepair
     }
 
     private StartAction lastStartAction = StartAction.Study;
@@ -25,12 +29,6 @@ public class UI_StartInput : MonoBehaviour
     [Tooltip("Maximum number of digits accepted by the VR numeric keypad.")]
     [SerializeField] private int maxNumericCharacters = 6;
 
-    [Header("Specific Trial Input")]
-    [Tooltip("Show the optional Block and Trial index fields for researcher recovery workflows.")]
-    [SerializeField] private bool showAdvancedStart = false;
-    [SerializeField] private TMP_InputField blockIDInput;
-    [SerializeField] private TMP_InputField trialIDInput;
-
     [SerializeField] private Toggle trainingToggle;
     [SerializeField] private Toggle formalToggle;
 
@@ -38,7 +36,17 @@ public class UI_StartInput : MonoBehaviour
     [SerializeField] private TMP_Text messageText;
     [SerializeField] private Button startStudyButton;
 
+    [Header("Developer Page Copy")]
+    [SerializeField] private TMP_InputField developerParticipantIDInput;
+    [SerializeField] private TMP_InputField developerBlockIDInput;
+    [SerializeField] private TMP_InputField developerTrialIDInput;
+    [SerializeField] private TMP_Text developerMessageText;
+    [SerializeField] private Button developerResumeStudyButton;
+    [SerializeField] private Button developerRepairTrialButton;
+
     private TMP_InputField activeNumericInput;
+
+    public bool LastRequestWasFormal { get; private set; }
 
     #endregion ====================================================
 
@@ -60,11 +68,11 @@ public class UI_StartInput : MonoBehaviour
         // safe default every time the start page is opened in Play mode.
         trainingToggle?.SetIsOnWithoutNotify(false);
         formalToggle?.SetIsOnWithoutNotify(true);
-        SetAdvancedStartVisible(showAdvancedStart);
 
         ConfigureNumericInput(participantIDInput, SelectParticipantInput);
-        ConfigureNumericInput(blockIDInput, SelectBlockInput);
-        ConfigureNumericInput(trialIDInput, SelectTrialInput);
+        ConfigureNumericInput(developerParticipantIDInput, SelectDeveloperParticipantInput);
+        ConfigureNumericInput(developerBlockIDInput, SelectDeveloperBlockInput);
+        ConfigureNumericInput(developerTrialIDInput, SelectDeveloperTrialInput);
         activeNumericInput = participantIDInput;
 
         ShowMessage("");
@@ -73,8 +81,9 @@ public class UI_StartInput : MonoBehaviour
     private void OnDestroy()
     {
         RemoveInputListener(participantIDInput, SelectParticipantInput);
-        RemoveInputListener(blockIDInput, SelectBlockInput);
-        RemoveInputListener(trialIDInput, SelectTrialInput);
+        RemoveInputListener(developerParticipantIDInput, SelectDeveloperParticipantInput);
+        RemoveInputListener(developerBlockIDInput, SelectDeveloperBlockInput);
+        RemoveInputListener(developerTrialIDInput, SelectDeveloperTrialInput);
     }
 
     #endregion ====================================================
@@ -91,14 +100,16 @@ public class UI_StartInput : MonoBehaviour
 
         if (participantIDInput == null ||
             !int.TryParse(participantIDInput.text, out int participantID) ||
-            participantID < 0)
+            participantID < MinimumParticipantId ||
+            participantID > MaximumParticipantId)
         {
-            ShowMessage("Please enter a valid participant ID (0 or greater).");
+            ShowMessage($"Please enter a participant ID between {MinimumParticipantId} and {MaximumParticipantId}.");
             return;
         }
 
         ShowMessage("");
         lastStartAction = StartAction.Study;
+        LastRequestWasFormal = formalToggle != null && formalToggle.isOn;
         Debug.Log($"[DensityJND] Start Study requested for participant {participantID}.");
         uiController?.BeginLoading();
 
@@ -114,70 +125,79 @@ public class UI_StartInput : MonoBehaviour
         }
     }
 
-    public void OnStartTrialClicked()
+    public void OnDeveloperResumeStudyClicked()
     {
         if (studyManager == null)
         {
-            ShowMessage("Study Manager is not available.");
+            ShowDeveloperStatus("Study Manager is not available.");
             return;
         }
 
-        if (participantIDInput == null ||
-            !int.TryParse(participantIDInput.text, out int participantID) ||
-            participantID < 0)
+        if (developerParticipantIDInput == null ||
+            !int.TryParse(developerParticipantIDInput.text, out int participantID) ||
+            participantID < MinimumParticipantId || participantID > MaximumParticipantId)
         {
-            ShowMessage("Please enter a valid participant ID (0 or greater).");
+            ShowDeveloperStatus($"Please enter a participant ID between {MinimumParticipantId} and {MaximumParticipantId}.");
             return;
         }
 
-        int blockID = 1;
-        if (blockIDInput != null && blockIDInput.gameObject.activeInHierarchy &&
-            (!int.TryParse(blockIDInput.text, out blockID) || blockID < 1))
-        {
-            ShowMessage("Block number must start at 1.");
-            return;
-        }
-
-        int trialID = 1;
-        if (trialIDInput != null && trialIDInput.gameObject.activeInHierarchy &&
-            (!int.TryParse(trialIDInput.text, out trialID) || trialID < 1))
-        {
-            ShowMessage("Trial number must start at 1.");
-            return;
-        }
-
-        StudyManager.StudyPhase phase;
-
-        // Formal takes precedence if a scene/prefab accidentally leaves both toggles on.
-        if (formalToggle != null && formalToggle.isOn)
-        {
-            phase = StudyManager.StudyPhase.Formal;
-        }
-        else if (trainingToggle != null && trainingToggle.isOn)
-        {
-            phase = StudyManager.StudyPhase.Training;
-        }
-        else
-        {
-            ShowMessage("Please select Training or Formal.");
-            return;
-        }
-
-        ShowMessage("");
-        lastStartAction = StartAction.SpecificTrial;
-        Debug.Log(
-            $"[DensityJND] Start Trial requested: participant {participantID}, " +
-            $"block {blockID}, trial {trialID}, phase {phase}.");
+        ShowDeveloperStatus("");
+        lastStartAction = StartAction.DeveloperResume;
+        LastRequestWasFormal = true;
+        Debug.Log($"[DensityJND] Resume requested for participant {participantID}.");
         uiController?.BeginLoading();
+        studyManager.ResumeStudy(participantID);
+    }
 
-        studyManager.StartTrial(participantID, blockID - 1, trialID - 1, phase);
+    public void OnDeveloperRepairTrialClicked()
+    {
+        if (studyManager == null)
+        {
+            ShowDeveloperStatus("Study Manager is not available.");
+            return;
+        }
+
+        if (developerParticipantIDInput == null ||
+            !int.TryParse(developerParticipantIDInput.text, out int participantID) ||
+            participantID < MinimumParticipantId || participantID > MaximumParticipantId)
+        {
+            ShowDeveloperStatus($"Please enter a participant ID between {MinimumParticipantId} and {MaximumParticipantId}.");
+            return;
+        }
+
+        if (developerBlockIDInput == null ||
+            !int.TryParse(developerBlockIDInput.text, out int blockID) || blockID < 1)
+        {
+            ShowDeveloperStatus("Block number must start at 1.");
+            return;
+        }
+
+        if (developerTrialIDInput == null ||
+            !int.TryParse(developerTrialIDInput.text, out int trialID) || trialID < 1)
+        {
+            ShowDeveloperStatus("Trial number must start at 1.");
+            return;
+        }
+
+        ShowDeveloperStatus("");
+        lastStartAction = StartAction.DeveloperRepair;
+        LastRequestWasFormal = true;
+        Debug.Log(
+            $"[DensityJND] Specific trial repair requested: participant {participantID}, " +
+            $"block {blockID}, trial {trialID}.");
+        uiController?.BeginLoading();
+        studyManager.RepairSpecificTrial(participantID, blockID - 1, trialID - 1);
     }
 
     public void RetryLastAction()
     {
-        if (lastStartAction == StartAction.SpecificTrial)
+        if (lastStartAction == StartAction.DeveloperResume)
         {
-            OnStartTrialClicked();
+            OnDeveloperResumeStudyClicked();
+        }
+        else if (lastStartAction == StartAction.DeveloperRepair)
+        {
+            OnDeveloperRepairTrialClicked();
         }
         else
         {
@@ -238,11 +258,14 @@ public class UI_StartInput : MonoBehaviour
     public void SetInteractable(bool interactable)
     {
         if (participantIDInput != null) participantIDInput.interactable = interactable;
-        if (blockIDInput != null) blockIDInput.interactable = interactable;
-        if (trialIDInput != null) trialIDInput.interactable = interactable;
         if (trainingToggle != null) trainingToggle.interactable = interactable;
         if (formalToggle != null) formalToggle.interactable = interactable;
         if (startStudyButton != null) startStudyButton.interactable = interactable;
+        if (developerParticipantIDInput != null) developerParticipantIDInput.interactable = interactable;
+        if (developerBlockIDInput != null) developerBlockIDInput.interactable = interactable;
+        if (developerTrialIDInput != null) developerTrialIDInput.interactable = interactable;
+        if (developerResumeStudyButton != null) developerResumeStudyButton.interactable = interactable;
+        if (developerRepairTrialButton != null) developerRepairTrialButton.interactable = interactable;
     }
 
     public void ShowMessage(string message)
@@ -250,6 +273,18 @@ public class UI_StartInput : MonoBehaviour
         if (messageText != null)
         {
             messageText.text = message;
+        }
+        if (developerMessageText != null)
+        {
+            developerMessageText.text = message;
+        }
+    }
+
+    public void ShowDeveloperStatus(string message)
+    {
+        if (developerMessageText != null)
+        {
+            developerMessageText.text = message;
         }
     }
 
@@ -277,19 +312,28 @@ public class UI_StartInput : MonoBehaviour
     }
 
     private void SelectParticipantInput(string unused) => activeNumericInput = participantIDInput;
-    private void SelectBlockInput(string unused) => activeNumericInput = blockIDInput;
-    private void SelectTrialInput(string unused) => activeNumericInput = trialIDInput;
+    private void SelectDeveloperParticipantInput(string unused) => activeNumericInput = developerParticipantIDInput;
+    private void SelectDeveloperBlockInput(string unused) => activeNumericInput = developerBlockIDInput;
+    private void SelectDeveloperTrialInput(string unused) => activeNumericInput = developerTrialIDInput;
 
-    private void SetAdvancedStartVisible(bool visible)
+    public void PrepareDeveloperRecovery(int participantID, int blockIndex, int trialIndex)
     {
-        if (participantIDInput != null)
+        if (developerParticipantIDInput != null && string.IsNullOrWhiteSpace(developerParticipantIDInput.text) &&
+            participantID >= MinimumParticipantId)
         {
-            Transform advancedTitle = participantIDInput.transform.parent?.Find("AdvancedTitle");
-            if (advancedTitle != null) advancedTitle.gameObject.SetActive(visible);
+            developerParticipantIDInput.SetTextWithoutNotify(participantID.ToString());
+        }
+        if (developerBlockIDInput != null && string.IsNullOrWhiteSpace(developerBlockIDInput.text) && blockIndex >= 0)
+        {
+            developerBlockIDInput.SetTextWithoutNotify((blockIndex + 1).ToString());
+        }
+        if (developerTrialIDInput != null && string.IsNullOrWhiteSpace(developerTrialIDInput.text) && trialIndex >= 0)
+        {
+            developerTrialIDInput.SetTextWithoutNotify((trialIndex + 1).ToString());
         }
 
-        if (blockIDInput != null) blockIDInput.gameObject.SetActive(visible);
-        if (trialIDInput != null) trialIDInput.gameObject.SetActive(visible);
+        activeNumericInput = developerParticipantIDInput;
+        ShowMessage("");
     }
 
     #endregion ====================================================

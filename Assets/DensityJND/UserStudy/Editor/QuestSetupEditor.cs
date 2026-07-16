@@ -198,7 +198,8 @@ public static class QuestSetupEditor
             }
         }
 
-        Canvas canvas = Object.FindObjectOfType<Canvas>(true);
+        GameObject studyCanvasObject = FindSceneObject("StudyCanvas");
+        Canvas canvas = studyCanvasObject != null ? studyCanvasObject.GetComponent<Canvas>() : null;
         if (canvas != null)
         {
             canvas.worldCamera = xrCamera;
@@ -206,9 +207,13 @@ public static class QuestSetupEditor
             canvasRect.anchorMin = new Vector2(0.5f, 0.5f);
             canvasRect.anchorMax = new Vector2(0.5f, 0.5f);
             canvasRect.pivot = new Vector2(0.5f, 0.5f);
-            canvasRect.anchoredPosition = Vector2.zero;
             GraphicRaycaster standard = canvas.GetComponent<GraphicRaycaster>();
-            if (standard != null) Object.DestroyImmediate(standard);
+            if (standard == null)
+            {
+                standard = canvas.gameObject.AddComponent<GraphicRaycaster>();
+            }
+            standard.ignoreReversedGraphics = false;
+            standard.enabled = false;
             if (canvas.GetComponent<TrackedDeviceGraphicRaycaster>() == null)
             {
                 canvas.gameObject.AddComponent<TrackedDeviceGraphicRaycaster>();
@@ -216,9 +221,9 @@ public static class QuestSetupEditor
             if (xrCamera != null)
             {
                 Transform previewPose = oldCamera != null ? oldCamera.transform : xrCamera.transform;
-                canvas.transform.position = previewPose.position + previewPose.forward * 2f;
-                canvas.transform.rotation = previewPose.rotation;
-                canvas.transform.localPosition = new Vector3(0f, 1f, -8f);
+                canvas.transform.SetPositionAndRotation(
+                    previewPose.position + previewPose.forward * 2f,
+                    previewPose.rotation);
             }
         }
 
@@ -228,7 +233,13 @@ public static class QuestSetupEditor
             manager.playerPosition = xrCamera.transform;
             EditorUtility.SetDirty(manager);
         }
-        return existing != null && xrCamera != null && manager != null && canvas != null;
+
+        StudyUISetupEditor.ConfigureAnswerHandUIIfAvailable();
+        GameObject answerView = FindSceneObject("AnswerUIView");
+        bool answerHandUIReady = answerView != null && answerView.GetComponent<Canvas>() != null &&
+                                 answerView.transform.parent != null &&
+                                 answerView.transform.parent.name == "Left Controller";
+        return existing != null && xrCamera != null && manager != null && canvas != null && answerHandUIReady;
     }
 
     private static void ConfigureAndroidPlayer()

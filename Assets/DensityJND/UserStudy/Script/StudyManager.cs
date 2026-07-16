@@ -21,6 +21,13 @@ public class StudyManager : MonoBehaviour
         Finished,
         Redo
     }
+
+    private enum TrialRunMode
+    {
+        Normal,
+        Resume,
+        RepairSingle
+    }
     
     public struct ConfigInfo
     {
@@ -97,6 +104,13 @@ public class StudyManager : MonoBehaviour
     public bool IsLastTrainingTrial =>
         currentPhase == StudyPhase.Training && currentTrainingTrial >= trainingCountPB - 1;
     public int BlockCount => blockCount;
+    public bool HasNextBlock => currentBlock + 1 < blockCount;
+    public bool HasPendingRecovery => redoList != null && redoList.Length > 0;
+    public string CurrentPhaseLabel => currentRunMode == TrialRunMode.Resume
+        ? "Resume"
+        : currentRunMode == TrialRunMode.RepairSingle
+            ? "Repair"
+            : currentPhase.ToString();
     
     #endregion ====================================================
     
@@ -132,6 +146,7 @@ public class StudyManager : MonoBehaviour
     private Vector3 stimuliOrigin;                     // 刺激渲染的中点
     private TrialInfo currentTrial;                    // 当下的trial 的信息
     private Coroutine stimulusTimerCoroutine;          // 正在运行的倒计时任务
+    private TrialRunMode currentRunMode = TrialRunMode.Normal;
     
     
     // 状态记录
@@ -184,12 +199,15 @@ public class StudyManager : MonoBehaviour
         
         
         
-        trialCountPB = 32; // Formal_OrderList / Formal_Scene 当前各包含 32 个 trial
+        trialCountPB = 20; // 新的 Formal_OrderList 每个 order 包含 20 个 trial
         trainingCountPB = 2; // TODO: 按实际情况修改
 
-        blockCount = 1; // TODO：按实际情况修改
+        blockCount = 4; // 新的 Formal_Participant 定义了 4 个 block
         blockFolderName = new String[blockCount];
-        blockFolderName[0] = "DensityJND_Equal"; // TODO：按实际情况修改
+        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            blockFolderName[blockIndex] = $"DensityJND_Block{blockIndex + 1}";
+        }
 
         trialStartTime = -1f;
     }
@@ -262,6 +280,13 @@ public class StudyManager : MonoBehaviour
     
     public IEnumerator StartTrialRoutine(int participantId, int blockId, int trialId, StudyPhase phase)
     {
+        // A direct Formal start must not reuse Training data left over from an
+        // earlier run in the same Play Mode session.
+        if (phase == StudyPhase.Formal)
+        {
+            trainingTrials = null;
+        }
+
         yield return ParticipantInit(
             participantId,
             phase == StudyPhase.Training,
@@ -275,8 +300,82 @@ public class StudyManager : MonoBehaviour
         EnterTrial(blockId, trialId, phase);
     }
 
+    public void ResumeStudy(int participantId)
+    {
+        StartCoroutine(ResumeStudyRoutine(participantId));
+    }
+
+    private IEnumerator ResumeStudyRoutine(int participantId)
+    {
+        yield return ParticipantInit(participantId, false, true);
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
+
+        if (!TryBuildRecoveryList(out List<RedoTrial> pendingTrials, out int validCount, out string error))
+        {
+            uiController?.SetStartBusy(false);
+            startInput?.ShowDeveloperStatus(error);
+            yield break;
+        }
+
+        redoList = pendingTrials.ToArray();
+        startInput?.ShowDeveloperStatus(BuildRecoveryStatus(validCount, redoList));
+        if (redoList.Length == 0)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
+
+        currentRunMode = TrialRunMode.Resume;
+        currentPhase = StudyPhase.Redo;
+        reTrialId = 0;
+        EnterRecoveryTrial(redoList[reTrialId]);
+    }
+
+    public void RepairSpecificTrial(int participantId, int blockId, int trialId)
+    {
+        if (blockId < 0 || blockId >= blockCount)
+        {
+            startInput?.ShowDeveloperStatus($"Block must be between 1 and {blockCount}.");
+            uiController?.SetStartBusy(false);
+            return;
+        }
+
+        if (trialId < 0 || trialId >= trialCountPB)
+        {
+            startInput?.ShowDeveloperStatus($"Trial must be between 1 and {trialCountPB}.");
+            uiController?.SetStartBusy(false);
+            return;
+        }
+
+        StartCoroutine(RepairSpecificTrialRoutine(participantId, blockId, trialId));
+    }
+
+    private IEnumerator RepairSpecificTrialRoutine(int participantId, int blockId, int trialId)
+    {
+        yield return ParticipantInit(participantId, false, true);
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
+
+        currentRunMode = TrialRunMode.RepairSingle;
+        currentPhase = StudyPhase.Redo;
+        currentBlock = blockId;
+        currentFormalTrial = trialId;
+        currentTrial = formalTrials[currentBlock][currentFormalTrial];
+
+        uiController?.ShowAnswering();
+        SetupTrial(currentTrial);
+    }
+
     private void EnterTrial(int blockId, int trialId, StudyPhase phase)
     {
+        currentRunMode = TrialRunMode.Normal;
         currentBlock = blockId;
         currentPhase = phase;
 
@@ -313,6 +412,7 @@ public class StudyManager : MonoBehaviour
             return;
         }
 
+        currentRunMode = TrialRunMode.Resume;
         currentPhase = StudyPhase.Redo;
 
         endUI.SetActive(false);
@@ -320,11 +420,15 @@ public class StudyManager : MonoBehaviour
 
         reTrialId = 0;
 
-        currentBlock = redoList[reTrialId].blockIndex;
-        currentFormalTrial = redoList[reTrialId].trialIndex;
+        EnterRecoveryTrial(redoList[reTrialId]);
+    }
 
+    private void EnterRecoveryTrial(RedoTrial trial)
+    {
+        currentBlock = trial.blockIndex;
+        currentFormalTrial = trial.trialIndex;
         currentTrial = formalTrials[currentBlock][currentFormalTrial];
-
+        uiController?.ShowAnswering();
         SetupTrial(currentTrial);
     }
     
@@ -379,6 +483,7 @@ public class StudyManager : MonoBehaviour
     // 开始训练部分
     public void StartTraining()
     {
+        currentRunMode = TrialRunMode.Normal;
         currentPhase = StudyPhase.Training;
         
         currentTrainingTrial = 0;
@@ -392,6 +497,7 @@ public class StudyManager : MonoBehaviour
     // 开始正式的实验
     public void StartFormal()
     {
+        currentRunMode = TrialRunMode.Normal;
         currentPhase = StudyPhase.Formal;
         currentFormalTrial = 0;
         currentTrial = formalTrials[currentBlock][currentFormalTrial];
@@ -423,12 +529,10 @@ public class StudyManager : MonoBehaviour
             forward = Vector3.forward;
         }
 
-        Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
-
         Quaternion stimulusRotation = Quaternion.LookRotation(forward, Vector3.up);
 
         // ===============================================================
-        // 2. 根据距离和视角夹角计算两个团中心
+        // 2. 根据距离计算整个数据集的中心
         // ===============================================================
 
         float configuredDistance = Mathf.Abs(currTrial.Distance);
@@ -438,36 +542,38 @@ public class StudyManager : MonoBehaviour
 
         Vector3 datasetCenter = playerPosition.position + forward * distance;
 
-        float halfAngleRad = clusterCenterAngleDeg * Mathf.Deg2Rad * 0.5f;
-        float halfGap = Mathf.Tan(halfAngleRad) * distance;
+        Vector3[] allWorldPoints;
+        if (currTrial.SourceLabel <= 0)
+        {
+            // 新正式刺激已在 CSV 中定义 label 1/2 的相对位置。
+            // 先合并再整体变换，避免分别居中后破坏原始左右间距。
+            Vector3[] rawPoints = MergeStimuli(currTrial.Stimulus1, currTrial.Stimulus2);
+            allWorldPoints = TransformStimulusToWorld(rawPoints, datasetCenter, stimulusRotation);
+        }
+        else
+        {
+            // 训练刺激从同一个源点云生成两个密度版本，需要单独放到左右。
+            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+            float halfAngleRad = clusterCenterAngleDeg * Mathf.Deg2Rad * 0.5f;
+            float halfGap = Mathf.Tan(halfAngleRad) * distance;
+            Vector3 stimulus1Center = datasetCenter - right * halfGap;
+            Vector3 stimulus2Center = datasetCenter + right * halfGap;
 
-        Vector3 stimulus1Center = datasetCenter - right * halfGap; // label 1 在左边
-        Vector3 stimulus2Center = datasetCenter + right * halfGap; // label 2 在右边
+            Vector3[] stimulus1World = TransformStimulusToWorld(
+                currTrial.Stimulus1,
+                stimulus1Center,
+                stimulusRotation
+            );
+            Vector3[] stimulus2World = TransformStimulusToWorld(
+                currTrial.Stimulus2,
+                stimulus2Center,
+                stimulusRotation
+            );
+            allWorldPoints = MergeStimuli(stimulus1World, stimulus2World);
+        }
 
         // ===============================================================
-        // 3. 分别变换两个团
-        // ===============================================================
-
-        Vector3[] stimulus1World = TransformStimulusToWorld(
-            currTrial.Stimulus1,
-            stimulus1Center,
-            stimulusRotation
-        );
-
-        Vector3[] stimulus2World = TransformStimulusToWorld(
-            currTrial.Stimulus2,
-            stimulus2Center,
-            stimulusRotation
-        );
-
-        // ===============================================================
-        // 4. 合并成一个 Vector3[]
-        // ===============================================================
-
-        Vector3[] allWorldPoints = MergeStimuli(stimulus1World, stimulus2World);
-
-        // ===============================================================
-        // 5. 只渲染一次
+        // 3. 只渲染一次
         // ===============================================================
 
         stimuliRender.Render(allWorldPoints); // 数据渲染
@@ -493,8 +599,15 @@ public class StudyManager : MonoBehaviour
         if(currentPhase == StudyPhase.Formal || currentPhase == StudyPhase.Redo)
         {
             AnswerOutput(resultFolder, currentBlock, ParticipantID, currentFormalTrial, participantAnswer, currentTrial);
-            // 重新配置
-            NextTrial();
+            if (currentRunMode == TrialRunMode.RepairSingle)
+            {
+                FinishSpecificTrialRepair();
+            }
+            else
+            {
+                // 重新配置
+                NextTrial();
+            }
         }
         
         
@@ -546,9 +659,18 @@ public class StudyManager : MonoBehaviour
                 }
                 else
                 {
-                    // 如果还有下一个 block，进入下一个 block 的 training
-                    currentBlock++;
-                    StartTraining();
+                    // Pause on the block summary. The researcher/participant explicitly
+                    // starts the next block from the new Next Block button.
+                    if (uiController != null)
+                    {
+                        uiController.ShowBlockEnd(
+                            $"Block {currentBlock + 1} of {blockCount} is complete.");
+                    }
+                    else
+                    {
+                        answerUI.SetActive(false);
+                        endUI.SetActive(true);
+                    }
                 }
                 
             }
@@ -566,26 +688,63 @@ public class StudyManager : MonoBehaviour
             
             if (reTrialId + 1 >= redoList.Length)
             {
-                currentPhase = StudyPhase.Finished;
-                    
-                answerUI.SetActive(false);
-                stimuliRender.ReleaseForReinit();
-
-                ResultsValidator();
-                    
-                endUI.SetActive(true); // TODO：同步数据扫描的信息, 结束且呈现一个 Summary
+                FinishResumeStudy();
             }
             else
             {
                 reTrialId++;
-                currentBlock = redoList[reTrialId].blockIndex;
-                currentFormalTrial = redoList[reTrialId].trialIndex;
-                
-                currentTrial = formalTrials[currentBlock][currentFormalTrial];
-                
-                SetupTrial(currentTrial);
+                EnterRecoveryTrial(redoList[reTrialId]);
             }
         }
+    }
+
+    public void StartNextBlock()
+    {
+        if (currentPhase != StudyPhase.Formal || !HasNextBlock)
+        {
+            return;
+        }
+
+        int nextBlock = currentBlock + 1;
+        bool hasTrainingForNextBlock = trainingTrials != null &&
+                                       nextBlock < trainingTrials.Length &&
+                                       trainingTrials[nextBlock] != null;
+
+        EnterTrial(
+            nextBlock,
+            0,
+            hasTrainingForNextBlock ? StudyPhase.Training : StudyPhase.Formal);
+    }
+
+    private void FinishResumeStudy()
+    {
+        stimuliRender.ReleaseForReinit();
+
+        TryBuildRecoveryList(out List<RedoTrial> pendingTrials, out int validCount, out string error);
+        redoList = pendingTrials != null ? pendingTrials.ToArray() : Array.Empty<RedoTrial>();
+
+        uiController?.ShowDeveloperRecovery();
+        startInput?.ShowDeveloperStatus(string.IsNullOrEmpty(error)
+            ? "Recovery complete.\n" + BuildRecoveryStatus(validCount, redoList)
+            : error);
+    }
+
+    private void FinishSpecificTrialRepair()
+    {
+        int repairedBlock = currentBlock;
+        int repairedTrial = currentFormalTrial;
+        stimuliRender.ReleaseForReinit();
+
+        TryBuildRecoveryList(out List<RedoTrial> pendingTrials, out int validCount, out string error);
+        redoList = pendingTrials != null ? pendingTrials.ToArray() : Array.Empty<RedoTrial>();
+
+        uiController?.ShowDeveloperRecovery();
+        string repairedLabel = blockCount > 1
+            ? $"Block {repairedBlock + 1}, Trial {repairedTrial + 1} repaired successfully."
+            : $"Trial {repairedTrial + 1} repaired successfully.";
+        startInput?.ShowDeveloperStatus(string.IsNullOrEmpty(error)
+            ? repairedLabel + "\n" + BuildRecoveryStatus(validCount, redoList)
+            : repairedLabel + "\n" + error);
     }
     
 
@@ -596,6 +755,17 @@ public class StudyManager : MonoBehaviour
         stimuliRender.ReleaseForReinit();
         
         SetupTrial(currentTrial);
+    }
+
+    public void PauseForFormalRecovery()
+    {
+        if (currentPhase != StudyPhase.Formal && currentPhase != StudyPhase.Redo)
+        {
+            return;
+        }
+
+        StopStimulusTimer();
+        stimuliRender?.ReleaseForReinit();
     }
     
 
@@ -671,7 +841,7 @@ public class StudyManager : MonoBehaviour
             trialInfo.RepetitionID.ToString(CultureInfo.InvariantCulture) + "," +
             trialInfo.SceneID.ToString(CultureInfo.InvariantCulture) + "," +
             trialInfo.Distance.ToString(CultureInfo.InvariantCulture) + "," +
-            trialInfo.DensityRatio.ToString(CultureInfo.InvariantCulture) + "\n";
+            trialInfo.DensityRatio.ToString(CultureInfo.InvariantCulture);
 
         UpdateTrialResult(filePath, trialId, line);
     }
@@ -680,6 +850,8 @@ public class StudyManager : MonoBehaviour
     private void UpdateTrialResult(string filePath, int trialId, string newLine)
     {
         List<string> lines = new List<string>(File.ReadAllLines(filePath));
+        lines.RemoveAll(string.IsNullOrWhiteSpace);
+        newLine = newLine.TrimEnd('\r', '\n');
         
         bool replaced = false;
 
@@ -714,118 +886,151 @@ public class StudyManager : MonoBehaviour
     // 完成实验后检查数据有效性，是否有需要重做的需求
     private void ResultsValidator()
     {
-        redoList = Array.Empty<RedoTrial>();
         redoUI.SetActive(false);
-        
-        List<RedoTrial> tempRedoList = new List<RedoTrial>();
 
-        for(int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        if (!TryBuildRecoveryList(out List<RedoTrial> pendingTrials, out _, out string error))
         {
-            string filePath = resultFolder + "/" + blockFolderName[blockIndex] + "/P_" + ParticipantID + ".csv";
-            
-            // ===============================================================
-            // 1. 检查结果文件是否存在
-            // ===============================================================
-
-            if(!File.Exists(filePath))
-            {
-                ShowWarning("Result file missing.\nPlease check the data output folder.");
-
-                return;
-            }
-            
-
-            string[] lines = File.ReadAllLines(filePath);
-            
-            // ===============================================================
-            // 2. 记录当前 block 已完成的 trial
-            // ===============================================================
-
-            bool[] finishedTrial = new bool[trialCountPB];
-
-            // ===============================================================
-            // 3. 检查每一行结果
-            // ===============================================================
-
-            for(int i = 1; i < lines.Length; i++)
-            {
-                // 空行跳过
-                if(lines[i].Trim() == "")
-                {
-                    continue;
-                }
-                
-                string[] cells = lines[i].Split(',');
-                
-                // 列数量异常
-                if(cells.Length < 9)
-                {
-                    continue;
-                }
-
-                // TrialID
-                if(!int.TryParse(cells[0], out int trialID))
-                {
-                    continue;
-                }
-                
-                // 超出当前block范围
-                if(trialID < 0 || trialID >= trialCountPB)
-                {
-                    continue;
-                }
-                
-                // 标记该trial已经存在
-                finishedTrial[trialID] = true;
-
-                // ===========================================================
-                // 检查数值异常
-                // ===========================================================
-
-                bool invalid = false;
-                
-                for(int j = 1; j < cells.Length; j++)
-                {
-                    if(cells[j].Contains("NaN") || cells[j].Contains("Infinity"))
-                    {
-                        invalid = true;
-                        break;
-                    }
-                }
-
-                if(invalid)
-                {
-                    tempRedoList.Add(new RedoTrial() { blockIndex = blockIndex, trialIndex = trialID });
-                }
-
-            }
-            
-            // ===============================================================
-            // 4. 检查缺失 trial
-            // ===============================================================
-
-            for(int trialIndex = 0; trialIndex < trialCountPB; trialIndex++)
-            {
-                if(!finishedTrial[trialIndex])
-                {
-                    tempRedoList.Add(new RedoTrial() { blockIndex = blockIndex, trialIndex = trialIndex });
-                }
-
-            }
-
+            redoList = Array.Empty<RedoTrial>();
+            ShowWarning(error);
+            return;
         }
 
+        redoList = pendingTrials.ToArray();
+    }
 
+    private bool TryBuildRecoveryList(out List<RedoTrial> pendingTrials, out int validCount, out string error)
+    {
+        pendingTrials = new List<RedoTrial>();
+        validCount = 0;
+        error = "";
+        bool foundAnyResultFile = false;
 
-        // ===============================================================
-        // 5. 保存需要 redo 的列表
-        // ===============================================================
+        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            string filePath = resultFolder + "/" + blockFolderName[blockIndex] + "/P_" + ParticipantID + ".csv";
+            bool[] validTrials = new bool[trialCountPB];
 
+            if (File.Exists(filePath))
+            {
+                foundAnyResultFile = true;
+                string[] lines = File.ReadAllLines(filePath);
+                for (int lineIndex = 1; lineIndex < lines.Length; lineIndex++)
+                {
+                    if (string.IsNullOrWhiteSpace(lines[lineIndex]))
+                    {
+                        continue;
+                    }
 
-        redoList = tempRedoList.ToArray();
-        redoUI.SetActive(redoList.Length > 0);
-        
-        
+                    string[] cells = lines[lineIndex].Split(',');
+                    if (cells.Length == 0 ||
+                        !int.TryParse(cells[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int trialId) ||
+                        trialId < 0 || trialId >= trialCountPB)
+                    {
+                        continue;
+                    }
+
+                    validTrials[trialId] = IsValidResultRow(cells);
+                }
+            }
+
+            for (int trialIndex = 0; trialIndex < trialCountPB; trialIndex++)
+            {
+                if (validTrials[trialIndex])
+                {
+                    validCount++;
+                }
+                else
+                {
+                    pendingTrials.Add(new RedoTrial { blockIndex = blockIndex, trialIndex = trialIndex });
+                }
+            }
+        }
+
+        if (!foundAnyResultFile)
+        {
+            error = "No saved study was found for this participant.";
+            pendingTrials.Clear();
+            validCount = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsValidResultRow(string[] cells)
+    {
+        if (cells.Length < 9)
+        {
+            return false;
+        }
+
+        for (int index = 1; index < cells.Length; index++)
+        {
+            if (cells[index].IndexOf("NaN", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                cells[index].IndexOf("Infinity", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private string BuildRecoveryStatus(int validCount, IReadOnlyList<RedoTrial> pendingTrials)
+    {
+        int totalTrials = blockCount * trialCountPB;
+        if (pendingTrials == null || pendingTrials.Count == 0)
+        {
+            return $"Valid: {validCount} / {totalTrials}\nPending: None";
+        }
+
+        if (blockCount == 1)
+        {
+            return $"Valid: {validCount} / {totalTrials}\nPending: Trial {FormatTrialNumbers(pendingTrials)}";
+        }
+
+        StringBuilder pending = new StringBuilder();
+        for (int index = 0; index < pendingTrials.Count; index++)
+        {
+            if (index > 0) pending.Append(", ");
+            RedoTrial trial = pendingTrials[index];
+            pending.Append($"B{trial.blockIndex + 1}/T{trial.trialIndex + 1}");
+        }
+
+        return $"Valid: {validCount} / {totalTrials}\nPending: {pending}";
+    }
+
+    private static string FormatTrialNumbers(IReadOnlyList<RedoTrial> pendingTrials)
+    {
+        StringBuilder result = new StringBuilder();
+        int index = 0;
+        while (index < pendingTrials.Count)
+        {
+            int rangeStart = pendingTrials[index].trialIndex + 1;
+            int rangeEnd = rangeStart;
+            int next = index + 1;
+            while (next < pendingTrials.Count &&
+                   pendingTrials[next].trialIndex == pendingTrials[next - 1].trialIndex + 1)
+            {
+                rangeEnd = pendingTrials[next].trialIndex + 1;
+                next++;
+            }
+
+            if (result.Length > 0) result.Append(", ");
+            if (rangeEnd - rangeStart >= 2)
+            {
+                result.Append(rangeStart).Append('-').Append(rangeEnd);
+            }
+            else
+            {
+                result.Append(rangeStart);
+                if (rangeEnd > rangeStart) result.Append(", ").Append(rangeEnd);
+            }
+
+            index = next;
+        }
+
+        return result.ToString();
     }
     
     
@@ -897,11 +1102,11 @@ public class StudyManager : MonoBehaviour
             }
 
             // 加载对应的 training 信息
-            yield return LoadTrialOrder(participantId, trainingConfig.participantCsv, trainingConfig.orderListCsv, trainingTrials);
+            yield return LoadTrialOrder(participantId, trainingConfig.participantCsv, trainingConfig.orderListCsv, trainingTrials, true);
             if (!loadSuccess) { yield break; }
             yield return LoadTrialInfos(trainingConfig.sceneCsv, trainingTrials);
             if (!loadSuccess) { yield break; }
-            yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials, false);
+            yield return LoadStimuli(trainingConfig.stimuliFolder, trainingTrials);
             if (!loadSuccess) { yield break; }
         }
         
@@ -924,7 +1129,7 @@ public class StudyManager : MonoBehaviour
             if (!loadSuccess) { yield break; }
             yield return LoadTrialInfos(formalConfig.sceneCsv, formalTrials);
             if (!loadSuccess) { yield break; }
-            yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials, true);
+            yield return LoadStimuli(formalConfig.stimuliFolder, formalTrials);
             if (!loadSuccess) { yield break; }
         }
         
@@ -934,7 +1139,12 @@ public class StudyManager : MonoBehaviour
 
     
     // 根据参与者的 Id 读取实验顺序
-    private IEnumerator LoadTrialOrder(int participantId, string participantCsv, string orderCsv, TrialInfo[][] trialInfos)
+    private IEnumerator LoadTrialOrder(
+        int participantId,
+        string participantCsv,
+        string orderCsv,
+        TrialInfo[][] trialInfos,
+        bool repeatFirstBlockOrder = false)
     {
         string participantText = "";
         string orderText = "";
@@ -999,12 +1209,18 @@ public class StudyManager : MonoBehaviour
                 if (rowParticipantID == participantId)
                 {
                     findParticipant = true;
-                    blockOrders = new int[blockCount];
+                    blockOrders = new int[trialInfos.Length];
 
-                    for (int blockIndex = 1; blockIndex <= blockCount; blockIndex++)
+                    int firstBlockOrderColumn = FindColumnIndex(participantHeader, "Block1_Order");
+                    for (int blockIndex = 1; blockIndex <= trialInfos.Length; blockIndex++)
                     {
                         string blockOrderColumnName = "Block" + blockIndex + "_Order";
                         int blockOrderColumn = FindColumnIndex(participantHeader, blockOrderColumnName);
+
+                        if (blockOrderColumn < 0 && repeatFirstBlockOrder)
+                        {
+                            blockOrderColumn = firstBlockOrderColumn;
+                        }
 
                         if (blockOrderColumn < 0)
                         {
@@ -1037,7 +1253,7 @@ public class StudyManager : MonoBehaviour
         string[] orderLines = orderText.Split('\n');
         
         // 逐个 block 读取对应的顺序
-        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        for (int blockIndex = 0; blockIndex < trialInfos.Length; blockIndex++)
         {
             int orderID = blockOrders[blockIndex];
             
@@ -1166,9 +1382,11 @@ public class StudyManager : MonoBehaviour
                             trial.RepetitionID = repetitionIdColumn >= 0
                                 ? int.Parse(cells[repetitionIdColumn].Trim())
                                 : 0;
+                            // SourceLabel 存在时，从单个源点云生成稀疏对（训练格式）。
+                            // 不存在时，CSV 中的 label 1/2 已经是要直接显示的左右刺激（新正式格式）。
                             trial.SourceLabel = sourceLabelColumn >= 0
                                 ? int.Parse(cells[sourceLabelColumn].Trim())
-                                : 1;
+                                : 0;
                             trial.SamplingSeed = samplingSeedColumn >= 0
                                 ? int.Parse(cells[samplingSeedColumn].Trim())
                                 : trial.ConditionID;
@@ -1202,8 +1420,7 @@ public class StudyManager : MonoBehaviour
     // 根据 StimuliName 读取具体的点数据
     private IEnumerator LoadStimuli(
         string stimuliFolder,
-        TrialInfo[][] trialInfos,
-        bool allowFormalPreviewFallback)
+        TrialInfo[][] trialInfos)
     {
         Dictionary<string, string> stimulusTextCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -1213,10 +1430,8 @@ public class StudyManager : MonoBehaviour
             {
                 TrialInfo trial = trialInfos[blockIndex][trialIndex];
 
-                string stimuliFileName = allowFormalPreviewFallback
-                    ? GetDatasetFileName(trial.StimuliName)
-                    : trial.StimuliName;
-                string stimuliPath = stimuliFolder + "/" + stimuliFileName + ".csv";
+                string stimuliFileName = GetStimulusFileName(trial.StimuliName);
+                string stimuliPath = stimuliFolder + "/" + stimuliFileName;
                 string stimuliText = "";
 
                 // Multiple conditions can share one source dataset. Read it once and
@@ -1229,45 +1444,14 @@ public class StudyManager : MonoBehaviour
 
                         if (request.result != UnityWebRequest.Result.Success)
                         {
-                            if (!allowFormalPreviewFallback)
-                            {
-                                ShowWarning("Unable to load stimulus data.\nPlease check the stimulus file path and dataset name.");
-                                loadSuccess = false;
-                                yield break;
-                            }
+                            ShowWarning($"Unable to load {stimuliFileName}.\nPlease check the Formal/Stimuli folder and DatasetName.");
+                            loadSuccess = false;
+                            yield break;
                         }
                         else
                         {
                             stimuliText = request.downloadHandler.text;
                             stimulusTextCache[stimuliFileName] = stimuliText;
-                        }
-                    }
-                }
-
-                // Formal_Scene.csv uses descriptive titles such as
-                // T1_Low_Dataset7_.... The Dataset7 part selects Dataset7.csv while
-                // the complete title remains untouched in TrialInfo. The repository
-                // currently only has Dataset1.csv, so use it for previewing missing
-                // formal datasets until the remaining files arrive.
-                if (string.IsNullOrEmpty(stimuliText) && allowFormalPreviewFallback)
-                {
-                    const string previewFileName = "Dataset1";
-                    if (!stimulusTextCache.TryGetValue(previewFileName, out stimuliText))
-                    {
-                        string previewPath = stimuliFolder + "/" + previewFileName + ".csv";
-                        using (UnityWebRequest previewRequest = UnityWebRequest.Get(ToRequestUrl(previewPath)))
-                        {
-                            yield return previewRequest.SendWebRequest();
-
-                            if (previewRequest.result != UnityWebRequest.Result.Success)
-                            {
-                                ShowWarning("Unable to load formal preview stimulus Dataset1.csv.\nPlease check the Formal/Stimuli folder.");
-                                loadSuccess = false;
-                                yield break;
-                            }
-
-                            stimuliText = previewRequest.downloadHandler.text;
-                            stimulusTextCache[previewFileName] = stimuliText;
                         }
                     }
                 }
@@ -1319,7 +1503,7 @@ public class StudyManager : MonoBehaviour
                     if (!pointsByLabel.TryGetValue(trial.SourceLabel, out List<Vector3> sourcePoints) ||
                         sourcePoints.Count == 0)
                     {
-                        ShowWarning($"{stimuliFileName}.csv does not contain label {trial.SourceLabel} for condition {trial.ConditionID}.");
+                        ShowWarning($"{stimuliFileName} does not contain label {trial.SourceLabel} for condition {trial.ConditionID}.");
                         loadSuccess = false;
                         yield break;
                     }
@@ -1342,7 +1526,7 @@ public class StudyManager : MonoBehaviour
                     }
                     else
                     {
-                        ShowWarning($"Condition {trial.ConditionID} has an invalid CorrectAnswer. Use 1 for Left or 2 for Right.");
+                        ShowWarning($"Condition {trial.ConditionID} has an invalid CorrectAnswer. Use 1 for Greater or 2 for Smaller.");
                         loadSuccess = false;
                         yield break;
                     }
@@ -1352,7 +1536,7 @@ public class StudyManager : MonoBehaviour
                     if (!pointsByLabel.TryGetValue(1, out List<Vector3> stimulus1) ||
                         !pointsByLabel.TryGetValue(2, out List<Vector3> stimulus2))
                     {
-                        ShowWarning("Training stimulus data must contain labels 1 and 2.");
+                        ShowWarning($"{stimuliFileName} must contain both label 1 and label 2.");
                         loadSuccess = false;
                         yield break;
                     }
@@ -1416,6 +1600,17 @@ public class StudyManager : MonoBehaviour
         return endIndex > markerIndex + marker.Length
             ? sceneTitle.Substring(markerIndex, endIndex - markerIndex)
             : sceneTitle;
+    }
+
+    private string GetStimulusFileName(string sceneTitle)
+    {
+        string trimmedTitle = sceneTitle.Trim();
+        if (trimmedTitle.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmedTitle;
+        }
+
+        return GetDatasetFileName(trimmedTitle) + ".csv";
     }
 
 
@@ -1538,7 +1733,7 @@ public class StudyManager : MonoBehaviour
         
         yield return new WaitForSeconds(stimulusVisibleSeconds);
 
-        if(currentPhase == StudyPhase.Formal  || currentPhase == StudyPhase.Redo)
+        if(currentPhase == StudyPhase.Training || currentPhase == StudyPhase.Formal || currentPhase == StudyPhase.Redo)
         {
             stimuliRender.ReleaseForReinit();
         }

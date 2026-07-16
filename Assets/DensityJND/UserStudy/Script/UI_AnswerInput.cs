@@ -4,6 +4,17 @@ using UnityEngine.UI;
 
 public class UI_AnswerInput : MonoBehaviour
 {
+    private const string QuestionCopy =
+        "Is the left cluster denser or less dense than the right?\n左边这个团的密度比右边更大还是更小？";
+    private const string GreaterCopy = "Greater\n更大";
+    private const string SmallerCopy = "Smaller\n更小";
+    private const string BilingualFontResource = "Fonts/NotoSansSC-AnswerTMP";
+    private const float TrainingAnswerButtonY = -45f;
+    private const float FormalAnswerButtonY = 55f;
+    private const float TrainingSubmitY = -130f;
+    private const float FormalSubmitY = -210f;
+    private static TMP_FontAsset bilingualFontAsset;
+
     #region =============== Inspector Configuration ===============
 
     [Header("Study Manager")]
@@ -17,6 +28,7 @@ public class UI_AnswerInput : MonoBehaviour
     [SerializeField] private TMP_Text trialText;           // 这个 Block 的第几个 trial
     [SerializeField] private TMP_Text countdownText;       // 这个 Trial 的倒计时
     [SerializeField] private TMP_Text messageText;         // 提示文本
+    [SerializeField] private TMP_Text questionText;        // 中英文密度判断问题
 
 
     [Header("Answer Buttons")]
@@ -32,9 +44,11 @@ public class UI_AnswerInput : MonoBehaviour
 
     #region =============== UI Input & Update ===============
 
-    private int currentAnswer = 0; // 0=None, 1=Left, 2=Right
+    private int currentAnswer = 0; // 0=None, 1=Greater, 2=Smaller
     private ColorBlock leftDefaultColors;
     private ColorBlock rightDefaultColors;
+    private TMP_Text leftLabelText;
+    private TMP_Text rightLabelText;
 
     #endregion ====================================================
 
@@ -45,12 +59,13 @@ public class UI_AnswerInput : MonoBehaviour
     public void RefreshTrialInformation()
     {
         currentAnswer = 0;
+        ApplyAnswerCopy();
 
         if (messageText != null) messageText.text = "";
         
         // 注：给用户看都是从 1 开始数
 
-        if (phaseText != null) phaseText.text = studyManager.currentPhase.ToString();
+        if (phaseText != null) phaseText.text = studyManager.CurrentPhaseLabel;
         if (blockText != null)
         {
             blockText.gameObject.SetActive(studyManager.BlockCount > 1);
@@ -67,6 +82,8 @@ public class UI_AnswerInput : MonoBehaviour
         ResetAnswerColors();
         SetAnswerButtonsInteractable(true);
         if (submitButton != null) submitButton.interactable = true;
+        UpdateAnswerButtonPositions();
+        UpdateSubmitButtonPosition();
 
         if (studyManager.currentPhase == StudyManager.StudyPhase.Training)
         {
@@ -113,6 +130,89 @@ public class UI_AnswerInput : MonoBehaviour
 
         if (leftButton != null) leftDefaultColors = leftButton.colors;
         if (rightButton != null) rightDefaultColors = rightButton.colors;
+
+        CacheAnswerCopyReferences();
+        ApplyAnswerCopy();
+    }
+
+    private void OnEnable()
+    {
+        if (questionText == null || leftLabelText == null || rightLabelText == null)
+        {
+            CacheAnswerCopyReferences();
+        }
+
+        ApplyAnswerCopy();
+    }
+
+    private void CacheAnswerCopyReferences()
+    {
+        Transform searchRoot = transform.parent != null ? transform.parent : transform;
+        foreach (TMP_Text candidate in searchRoot.GetComponentsInChildren<TMP_Text>(true))
+        {
+            if (questionText == null && candidate.name == "Question")
+            {
+                questionText = candidate;
+            }
+        }
+
+        leftLabelText = leftButton != null ? leftButton.GetComponentInChildren<TMP_Text>(true) : null;
+        rightLabelText = rightButton != null ? rightButton.GetComponentInChildren<TMP_Text>(true) : null;
+    }
+
+    private void ApplyAnswerCopy()
+    {
+        TMP_FontAsset font = GetBilingualFontAsset();
+        ApplyFont(questionText, font);
+        ApplyFont(leftLabelText, font);
+        ApplyFont(rightLabelText, font);
+
+        if (questionText != null)
+        {
+            questionText.text = QuestionCopy;
+            questionText.fontSize = 32f;
+            questionText.rectTransform.sizeDelta = new Vector2(960f, 110f);
+            questionText.ForceMeshUpdate();
+        }
+        if (leftLabelText != null)
+        {
+            leftLabelText.text = GreaterCopy;
+            leftLabelText.fontSize = 30f;
+            leftLabelText.ForceMeshUpdate();
+        }
+        if (rightLabelText != null)
+        {
+            rightLabelText.text = SmallerCopy;
+            rightLabelText.fontSize = 30f;
+            rightLabelText.ForceMeshUpdate();
+        }
+    }
+
+    private static void ApplyFont(TMP_Text target, TMP_FontAsset font)
+    {
+        if (target == null || font == null)
+        {
+            return;
+        }
+
+        target.font = font;
+        target.fontSharedMaterial = font.material;
+    }
+
+    private static TMP_FontAsset GetBilingualFontAsset()
+    {
+        if (bilingualFontAsset != null)
+        {
+            return bilingualFontAsset;
+        }
+
+        bilingualFontAsset = Resources.Load<TMP_FontAsset>(BilingualFontResource);
+        if (bilingualFontAsset == null)
+        {
+            Debug.LogWarning("[DensityJND] The persistent bilingual Answer UI TMP font could not be loaded.");
+            return null;
+        }
+        return bilingualFontAsset;
     }
     
     
@@ -205,10 +305,63 @@ public class UI_AnswerInput : MonoBehaviour
         studyManager.FinishTraining();
     }
 
+    private void LateUpdate()
+    {
+        TMP_FontAsset font = GetBilingualFontAsset();
+        if (font == null)
+        {
+            return;
+        }
+
+        if ((questionText != null && questionText.font != font) ||
+            (leftLabelText != null && leftLabelText.font != font) ||
+            (rightLabelText != null && rightLabelText.font != font))
+        {
+            ApplyAnswerCopy();
+        }
+    }
+
     private void SetAnswerButtonsInteractable(bool interactable)
     {
         if (leftButton != null) leftButton.interactable = interactable;
         if (rightButton != null) rightButton.interactable = interactable;
+    }
+
+    private void UpdateSubmitButtonPosition()
+    {
+        if (submitButton == null || studyManager == null) return;
+
+        RectTransform rect = submitButton.GetComponent<RectTransform>();
+        if (rect == null) return;
+
+        Vector2 position = rect.anchoredPosition;
+        position.y = studyManager.currentPhase == StudyManager.StudyPhase.Formal
+            ? FormalSubmitY
+            : TrainingSubmitY;
+        rect.anchoredPosition = position;
+    }
+
+    private void UpdateAnswerButtonPositions()
+    {
+        if (studyManager == null) return;
+
+        float y = studyManager.currentPhase == StudyManager.StudyPhase.Training
+            ? TrainingAnswerButtonY
+            : FormalAnswerButtonY;
+        SetButtonY(leftButton, y);
+        SetButtonY(rightButton, y);
+    }
+
+    private static void SetButtonY(Button button, float y)
+    {
+        if (button == null) return;
+
+        RectTransform rect = button.GetComponent<RectTransform>();
+        if (rect == null) return;
+
+        Vector2 position = rect.anchoredPosition;
+        position.y = y;
+        rect.anchoredPosition = position;
     }
 
     private static void SetButtonState(Button button, bool visible, bool interactable)

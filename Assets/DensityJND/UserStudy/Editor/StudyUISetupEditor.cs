@@ -14,7 +14,11 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v33";
+    private const string MarkerName = "GeneratedCompleteUI_v53";
+    private const float StartViewScale = 0.78f;
+    private const float EndViewScale = 0.78f;
+    private const float AnswerHandScale = 0.00032f;
+    private const float AnswerHandForwardOffset = 0.30f;
     private const string RoundedSpritePath =
         "Assets/Samples/XR Interaction Toolkit/2.5.4/Starter Assets/DemoSceneAssets/Sprites/Round Radius 4.png";
     // Horizon-inspired semantic palette: neutral surfaces, soft text and one restrained action blue.
@@ -47,6 +51,7 @@ public static class StudyUISetupEditor
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
         {
+            EditorApplication.delayCall += AutomaticBuild;
             return;
         }
 
@@ -60,9 +65,15 @@ public static class StudyUISetupEditor
         {
             BuildCompleteUI(false);
         }
-        else if (ConfigureXRIfAvailable())
+        else
         {
-            EditorSceneManager.SaveScene(scene);
+            bool changed = ConfigureXRIfAvailable();
+            changed |= ConfigureAnswerHandUIIfAvailable();
+            changed |= EnsureNextBlockUI();
+            if (changed)
+            {
+                EditorSceneManager.SaveScene(scene);
+            }
         }
     }
 
@@ -105,7 +116,8 @@ public static class StudyUISetupEditor
 
         bool cameraWasActive = camera.gameObject.activeSelf;
         camera.gameObject.SetActive(true);
-        Canvas canvas = UnityEngine.Object.FindObjectOfType<Canvas>(true);
+        GameObject studyCanvasObject = FindSceneObject("StudyCanvas");
+        Canvas canvas = studyCanvasObject != null ? studyCanvasObject.GetComponent<Canvas>() : null;
         if (canvas != null)
         {
             canvas.worldCamera = camera;
@@ -179,9 +191,9 @@ public static class StudyUISetupEditor
         GameObject finishView = CreateView(canvas.transform, finishPlaceholder, "FinishUIView");
         GameObject warningView = CreateView(canvas.transform, warningPlaceholder, "WarningUIView");
 
-        StartWidgets start = BuildStartView(startView.transform, startInput);
+        StartViewWidgets start = BuildStartView(startView.transform, startInput, controller);
         AnswerWidgets answer = BuildAnswerView(answerView.transform, answerInput);
-        EndWidgets end = BuildEndView(endView.transform);
+        EndWidgets end = BuildEndView(endView.transform, controller);
         FinishWidgets finish = BuildFinishView(finishView.transform, manager);
         WarningWidgets warning = BuildWarningView(warningView.transform, controller);
 
@@ -190,10 +202,11 @@ public static class StudyUISetupEditor
         ConfigureManager(manager, stimuli, startInput, answerInput, startView, answerView, warningView, endView,
             finishView);
         ConfigureController(controller, manager, startInput, startView, answerView, endView, finishView, warningView,
-            warning.Message, end.Summary, warning.Retry);
+            warning.Message, end, warning.Retry, start);
 
         EnsureEventSystem();
         ConfigureXRIfAvailable();
+        ConfigureAnswerHandUIIfAvailable();
 
         startView.SetActive(true);
         answerView.SetActive(false);
@@ -236,48 +249,102 @@ public static class StudyUISetupEditor
         }
     }
 
-    private static StartWidgets BuildStartView(Transform view, UI_StartInput inputHandler)
+    private static StartViewWidgets BuildStartView(Transform view, UI_StartInput inputHandler,
+        StudyUIController controller)
     {
         GameObject panel = CreatePanel("StartPanel", view, Background);
-        GameObject card = CreateCard("StartCard", panel.transform, Card, new Vector2(1040, 800));
-        CreateText("Title", card.transform, "Density Judgment Study", 48, FontStyles.Bold,
-            new Vector2(0, 270), new Vector2(900, 70));
+        panel.transform.localScale = Vector3.one * StartViewScale;
+        GameObject experimenterPage = CreateUIObject("ExperimenterStartPage", panel.transform);
+        Stretch(experimenterPage.GetComponent<RectTransform>());
+        GameObject developerPage = CreateUIObject("DeveloperStartPage", panel.transform);
+        Stretch(developerPage.GetComponent<RectTransform>());
+
+        StartWidgets experimenter = BuildStartPage(experimenterPage.transform, inputHandler, false);
+        StartWidgets developer = BuildStartPage(developerPage.transform, inputHandler, true);
+
+        Button experimenterTab = CreateIconButton("ExperimenterTabButton", panel.transform, false, true);
+        SetRect(experimenterTab.GetComponent<RectTransform>(), new Vector2(480, 340), new Vector2(64, 64));
+        UnityEventTools.AddPersistentListener(experimenterTab.onClick, controller.ShowExperimenterStartPage);
+
+        Button developerTab = CreateIconButton("DeveloperTabButton", panel.transform, true, false);
+        SetRect(developerTab.GetComponent<RectTransform>(), new Vector2(480, 266), new Vector2(64, 64));
+        UnityEventTools.AddPersistentListener(developerTab.onClick, controller.ShowDeveloperStartPage);
+
+        developerPage.SetActive(false);
+        return new StartViewWidgets(experimenterPage, developerPage, experimenterTab, developerTab,
+            experimenter, developer);
+    }
+
+    private static StartWidgets BuildStartPage(Transform page, UI_StartInput inputHandler, bool isDeveloper)
+    {
+        string prefix = isDeveloper ? "Developer" : "";
+        GameObject card = CreateCard(prefix + "StartCard", page, Card, new Vector2(1040, 800));
+        CreateText("Title", card.transform, isDeveloper ? "Formal Trial Recovery" : "Density Judgment Study",
+            48, FontStyles.Bold, new Vector2(0, 270), new Vector2(900, 70));
         TMP_Text instruction = CreateText("Instruction", card.transform,
-            "Select a field, then enter numbers with the VR keypad.", 25,
+            isDeveloper
+                ? "Resume a Formal study from a selected block and trial."
+                : "Select a field, then enter numbers with the VR keypad.", 25,
             FontStyles.Normal, new Vector2(0, 205), new Vector2(920, 55));
         instruction.color = MutedText;
 
-        TMP_InputField participant = CreateInputField("ParticipantIDInput", card.transform, "Participant ID");
-        SetRect(participant.GetComponent<RectTransform>(), new Vector2(-255, 50), new Vector2(420, 72));
-        Button startStudy = CreateButton("StartStudyButton", card.transform, "Start Study", Primary);
-        SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(-255, -50), new Vector2(420, 72));
-        UnityEventTools.AddPersistentListener(startStudy.onClick, inputHandler.OnStartStudyClicked);
+        TMP_InputField participant;
+        TMP_InputField block = null;
+        TMP_InputField trial = null;
+        TMP_Text message;
+        Button startStudy;
+        Button repairTrial = null;
+        Toggle training = null;
+        Toggle formal = null;
 
-        TMP_Text advancedTitle = CreateText("AdvancedTitle", card.transform, "Advanced start", 22,
-            FontStyles.Bold, new Vector2(-255, -25), new Vector2(420, 42));
-        advancedTitle.color = MutedText;
+        if (isDeveloper)
+        {
+            participant = CreateInputField(prefix + "ParticipantIDInput", card.transform, "Participant ID");
+            SetRect(participant.GetComponent<RectTransform>(), new Vector2(-255, 110), new Vector2(420, 66));
 
-        TMP_InputField block = CreateInputField("BlockIDInput", card.transform, "Block (starts at 1)");
-        SetRect(block.GetComponent<RectTransform>(), new Vector2(-385, -95), new Vector2(240, 62));
-        TMP_InputField trial = CreateInputField("TrialIDInput", card.transform, "Trial (starts at 1)");
-        SetRect(trial.GetComponent<RectTransform>(), new Vector2(-125, -95), new Vector2(240, 62));
+            startStudy = CreateButton(prefix + "ResumeStudyButton", card.transform, "Resume Study", Primary);
+            SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(-255, 20), new Vector2(420, 62));
+            UnityEventTools.AddPersistentListener(startStudy.onClick, inputHandler.OnDeveloperResumeStudyClicked);
 
-        ToggleGroup phaseGroup = card.AddComponent<ToggleGroup>();
-        phaseGroup.allowSwitchOff = false;
-        CreateText("PhaseSelectorLabel", card.transform, "Study mode", 20, FontStyles.Bold,
-            new Vector2(-255, -165), new Vector2(420, 30)).color = MutedText;
-        Toggle training = CreateToggle("TrainingToggle", card.transform, "Training", phaseGroup, false);
-        SetRect(training.GetComponent<RectTransform>(), new Vector2(-365, -235), new Vector2(200, 68));
-        Toggle formal = CreateToggle("FormalToggle", card.transform, "Formal", phaseGroup, true);
-        SetRect(formal.GetComponent<RectTransform>(), new Vector2(-145, -235), new Vector2(200, 68));
+            CreateText("StatusLabel", card.transform, "Status:", 20, FontStyles.Bold,
+                new Vector2(-255, -40), new Vector2(420, 30)).color = MutedText;
+            message = CreateText(prefix + "StatusText", card.transform, "", 22, FontStyles.Normal,
+                new Vector2(-255, -85), new Vector2(450, 90));
+            message.color = MutedText;
 
-        advancedTitle.gameObject.SetActive(false);
-        block.gameObject.SetActive(false);
-        trial.gameObject.SetActive(false);
+            block = CreateInputField(prefix + "BlockIDInput", card.transform, "Block");
+            SetRect(block.GetComponent<RectTransform>(), new Vector2(-365, -185), new Vector2(200, 58));
+            trial = CreateInputField(prefix + "TrialIDInput", card.transform, "Trial");
+            SetRect(trial.GetComponent<RectTransform>(), new Vector2(-145, -185), new Vector2(200, 58));
 
-        TMP_Text message = CreateText("MessageText", card.transform, "", 25, FontStyles.Normal,
-            new Vector2(-255, -345), new Vector2(450, 80));
-        message.color = Error;
+            repairTrial = CreateButton(prefix + "RepairTrialButton", card.transform,
+                "Repair Specific Trial", Secondary);
+            SetRect(repairTrial.GetComponent<RectTransform>(), new Vector2(-255, -255),
+                new Vector2(420, 62));
+            UnityEventTools.AddPersistentListener(repairTrial.onClick,
+                inputHandler.OnDeveloperRepairTrialClicked);
+        }
+        else
+        {
+            participant = CreateInputField(prefix + "ParticipantIDInput", card.transform, "Participant ID");
+            SetRect(participant.GetComponent<RectTransform>(), new Vector2(-255, 50), new Vector2(420, 72));
+            startStudy = CreateButton(prefix + "StartStudyButton", card.transform, "Start Study", Primary);
+            SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(-255, -50), new Vector2(420, 72));
+            UnityEventTools.AddPersistentListener(startStudy.onClick, inputHandler.OnStartStudyClicked);
+
+            ToggleGroup phaseGroup = card.AddComponent<ToggleGroup>();
+            phaseGroup.allowSwitchOff = false;
+            CreateText("PhaseSelectorLabel", card.transform, "Study mode", 20, FontStyles.Bold,
+                new Vector2(-255, -165), new Vector2(420, 30)).color = MutedText;
+            training = CreateToggle(prefix + "TrainingToggle", card.transform, "Training", phaseGroup, false);
+            SetRect(training.GetComponent<RectTransform>(), new Vector2(-365, -235), new Vector2(200, 68));
+            formal = CreateToggle(prefix + "FormalToggle", card.transform, "Formal", phaseGroup, true);
+            SetRect(formal.GetComponent<RectTransform>(), new Vector2(-145, -235), new Vector2(200, 68));
+
+            message = CreateText(prefix + "MessageText", card.transform, "", 25, FontStyles.Normal,
+                new Vector2(-255, -345), new Vector2(450, 80));
+            message.color = Error;
+        }
 
         CreateText("KeypadTitle", card.transform, "VR numeric keypad", 22, FontStyles.Bold,
             new Vector2(270, 105), new Vector2(380, 42)).color = MutedText;
@@ -293,26 +360,27 @@ public static class StudyUISetupEditor
             for (int column = 0; column < 3; column++)
             {
                 string digit = keys[row, column];
-                Button key = CreateButton("Key" + digit, card.transform, digit, Secondary);
+                Button key = CreateButton(prefix + "Key" + digit, card.transform, digit, Secondary);
                 SetRect(key.GetComponent<RectTransform>(),
                     new Vector2(150 + column * 120, 25 - row * 92), new Vector2(100, 72));
                 UnityEventTools.AddStringPersistentListener(key.onClick, inputHandler.AppendDigit, digit);
             }
         }
 
-        Button clear = CreateButton("KeyClear", card.transform, "Clear", Secondary);
+        Button clear = CreateButton(prefix + "KeyClear", card.transform, "Clear", Secondary);
         SetRect(clear.GetComponent<RectTransform>(), new Vector2(150, -251), new Vector2(100, 72));
         UnityEventTools.AddPersistentListener(clear.onClick, inputHandler.ClearNumericInput);
 
-        Button zero = CreateButton("Key0", card.transform, "0", Secondary);
+        Button zero = CreateButton(prefix + "Key0", card.transform, "0", Secondary);
         SetRect(zero.GetComponent<RectTransform>(), new Vector2(270, -251), new Vector2(100, 72));
         UnityEventTools.AddStringPersistentListener(zero.onClick, inputHandler.AppendDigit, "0");
 
-        Button back = CreateButton("KeyBackspace", card.transform, "Back", Secondary);
+        Button back = CreateButton(prefix + "KeyBackspace", card.transform, "Back", Secondary);
         SetRect(back.GetComponent<RectTransform>(), new Vector2(390, -251), new Vector2(100, 72));
         UnityEventTools.AddPersistentListener(back.onClick, inputHandler.BackspaceNumericInput);
 
-        return new StartWidgets(participant, block, trial, training, formal, message, startStudy);
+        return new StartWidgets(participant, block, trial, training, formal, message, startStudy,
+            repairTrial);
     }
 
     private static AnswerWidgets BuildAnswerView(Transform view, UI_AnswerInput inputHandler)
@@ -331,16 +399,17 @@ public static class StudyUISetupEditor
         TMP_Text countdown = CreateText("CountdownText", card.transform, "", 32, FontStyles.Bold,
             new Vector2(500, statusRowY), new Vector2(60, 52));
 
-        CreateText("Question", card.transform, "Which side appears denser?", 42, FontStyles.Bold,
-            new Vector2(0, 185), new Vector2(900, 72));
+        TMP_Text question = CreateText("Question", card.transform,
+            "Is the left cluster denser or less dense than the right?\n左边这个团的密度比右边更大还是更小？",
+            32, FontStyles.Bold, new Vector2(0, 185), new Vector2(960, 110));
 
-        Button left = CreateButton("LeftButton", card.transform, "Left", Secondary);
+        Button left = CreateButton("LeftButton", card.transform, "Greater\n更大", Secondary);
         SetRect(left.GetComponent<RectTransform>(), new Vector2(-245, 55), new Vector2(410, 126));
-        left.GetComponentInChildren<TMP_Text>().fontSize = 32;
+        left.GetComponentInChildren<TMP_Text>().fontSize = 30;
         UnityEventTools.AddPersistentListener(left.onClick, inputHandler.OnLeftClicked);
-        Button right = CreateButton("RightButton", card.transform, "Right", Secondary);
+        Button right = CreateButton("RightButton", card.transform, "Smaller\n更小", Secondary);
         SetRect(right.GetComponent<RectTransform>(), new Vector2(245, 55), new Vector2(410, 126));
-        right.GetComponentInChildren<TMP_Text>().fontSize = 32;
+        right.GetComponentInChildren<TMP_Text>().fontSize = 30;
         UnityEventTools.AddPersistentListener(right.onClick, inputHandler.OnRightClicked);
 
         TMP_Text message = CreateText("AnswerMessage", card.transform, "", 25, FontStyles.Normal,
@@ -367,38 +436,50 @@ public static class StudyUISetupEditor
         again.interactable = false;
         formal.interactable = true;
 
-        return new AnswerWidgets(phase, block, trial, countdown, message, left, right, submit, next, again, formal);
+        return new AnswerWidgets(phase, block, trial, countdown, question, message, left, right, submit, next, again,
+            formal);
     }
 
-    private static EndWidgets BuildEndView(Transform view)
+    private static EndWidgets BuildEndView(Transform view, StudyUIController controller)
     {
         GameObject panel = CreatePanel("EndPanel", view, Background);
-        GameObject card = CreateCard("EndCard", panel.transform, Card, new Vector2(920, 430));
-        CreateText("EndTitle", card.transform, "Study Complete", 50, FontStyles.Bold,
-            new Vector2(0, 110), new Vector2(820, 80));
+        panel.transform.localScale = Vector3.one * EndViewScale;
+        GameObject card = CreateCard("EndCard", panel.transform, Card, new Vector2(920, 520));
+        TMP_Text title = CreateText("StudyCompleteReturnToStartButton", card.transform, "Study Complete", 50,
+            FontStyles.Bold, new Vector2(0, 140), new Vector2(820, 80));
+        Button returnToStart = title.gameObject.AddComponent<Button>();
+        returnToStart.targetGraphic = title;
+        returnToStart.transition = Selectable.Transition.None;
+        Navigation navigation = returnToStart.navigation;
+        navigation.mode = Navigation.Mode.None;
+        returnToStart.navigation = navigation;
+        UnityEventTools.AddPersistentListener(returnToStart.onClick,
+            controller.ReturnToStartFromStudyComplete);
         TMP_Text summary = CreateText("EndSummary", card.transform,
             "The study is complete. Results were saved successfully.", 30, FontStyles.Normal,
-            new Vector2(0, 5), new Vector2(800, 110));
+            new Vector2(0, 35), new Vector2(800, 110));
         summary.color = MutedText;
         CreateText("EndInstruction", card.transform,
             "Please keep the headset on and wait for the researcher.", 25, FontStyles.Normal,
-            new Vector2(0, -105), new Vector2(800, 64)).color = MutedText;
-        return new EndWidgets(summary);
+            new Vector2(0, -55), new Vector2(800, 64)).color = MutedText;
+        Button nextBlock = CreateButton("NextBlockButton", card.transform, "Next Block", Primary);
+        SetRect(nextBlock.GetComponent<RectTransform>(), new Vector2(0, -155), new Vector2(360, 82));
+        nextBlock.GetComponentInChildren<TMP_Text>().fontSize = 30;
+        UnityEventTools.AddPersistentListener(nextBlock.onClick, controller.OnNextBlockClicked);
+        nextBlock.gameObject.SetActive(false);
+        return new EndWidgets(title, summary, nextBlock);
     }
 
     private static FinishWidgets BuildFinishView(Transform view, StudyManager manager)
     {
         Image dim = CreatePanel("RedoDim", view, new Color(0f, 0f, 0f, 0.58f)).GetComponent<Image>();
         GameObject card = CreateCard("RedoCard", dim.transform, Card, new Vector2(780, 370));
-        CreateText("RedoTitle", card.transform, "Additional Trials Required", 38, FontStyles.Bold,
+        CreateText("RedoTitle", card.transform, "Researcher Review Required", 38, FontStyles.Bold,
             new Vector2(0, 95), new Vector2(680, 60));
         CreateText("RedoText", card.transform,
-            "Some saved trials are missing or invalid. Select Start Redo to complete them.", 26,
+            "Open Study Recovery Tools from the Developer page to review the saved trials.", 26,
             FontStyles.Normal, new Vector2(0, 15), new Vector2(660, 90)).color = MutedText;
-        Button redo = CreateButton("StartRedoButton", card.transform, "Start Redo", Primary);
-        SetRect(redo.GetComponent<RectTransform>(), new Vector2(0, -105), new Vector2(280, 62));
-        UnityEventTools.AddPersistentListener(redo.onClick, manager.StartRedo);
-        return new FinishWidgets(redo);
+        return new FinishWidgets(null);
     }
 
     private static WarningWidgets BuildWarningView(Transform view, StudyUIController controller)
@@ -421,20 +502,22 @@ public static class StudyUISetupEditor
     }
 
     private static void ConfigureStartInput(UI_StartInput input, StudyManager manager, StudyUIController controller,
-        StartWidgets widgets)
+        StartViewWidgets widgets)
     {
         SerializedObject serialized = new SerializedObject(input);
         SetObject(serialized, "studyManager", manager);
         SetObject(serialized, "uiController", controller);
-        SetObject(serialized, "participantIDInput", widgets.Participant);
-        SerializedProperty showAdvancedStart = serialized.FindProperty("showAdvancedStart");
-        if (showAdvancedStart != null) showAdvancedStart.boolValue = false;
-        SetObject(serialized, "blockIDInput", widgets.Block);
-        SetObject(serialized, "trialIDInput", widgets.Trial);
-        SetObject(serialized, "trainingToggle", widgets.Training);
-        SetObject(serialized, "formalToggle", widgets.Formal);
-        SetObject(serialized, "messageText", widgets.Message);
-        SetObject(serialized, "startStudyButton", widgets.StartStudy);
+        SetObject(serialized, "participantIDInput", widgets.Experimenter.Participant);
+        SetObject(serialized, "trainingToggle", widgets.Experimenter.Training);
+        SetObject(serialized, "formalToggle", widgets.Experimenter.Formal);
+        SetObject(serialized, "messageText", widgets.Experimenter.Message);
+        SetObject(serialized, "startStudyButton", widgets.Experimenter.StartStudy);
+        SetObject(serialized, "developerParticipantIDInput", widgets.Developer.Participant);
+        SetObject(serialized, "developerBlockIDInput", widgets.Developer.Block);
+        SetObject(serialized, "developerTrialIDInput", widgets.Developer.Trial);
+        SetObject(serialized, "developerMessageText", widgets.Developer.Message);
+        SetObject(serialized, "developerResumeStudyButton", widgets.Developer.StartStudy);
+        SetObject(serialized, "developerRepairTrialButton", widgets.Developer.RepairTrial);
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
@@ -448,6 +531,7 @@ public static class StudyUISetupEditor
         SetObject(serialized, "blockText", widgets.Block);
         SetObject(serialized, "trialText", widgets.Trial);
         SetObject(serialized, "countdownText", widgets.Countdown);
+        SetObject(serialized, "questionText", widgets.Question);
         SetObject(serialized, "messageText", widgets.Message);
         SetObject(serialized, "leftButton", widgets.Left);
         SetObject(serialized, "rightButton", widgets.Right);
@@ -477,7 +561,7 @@ public static class StudyUISetupEditor
 
     private static void ConfigureController(StudyUIController controller, StudyManager manager, UI_StartInput startInput,
         GameObject start, GameObject answer, GameObject end, GameObject finish, GameObject warning,
-        TMP_Text warningText, TMP_Text endSummary, Button retry)
+        TMP_Text warningText, EndWidgets endWidgets, Button retry, StartViewWidgets startWidgets)
     {
         SerializedObject serialized = new SerializedObject(controller);
         SetObject(serialized, "studyManager", manager);
@@ -487,8 +571,14 @@ public static class StudyUISetupEditor
         SetObject(serialized, "endUI", end);
         SetObject(serialized, "finishUI", finish);
         SetObject(serialized, "warningUI", warning);
+        SetObject(serialized, "experimenterStartPage", startWidgets.ExperimenterPage);
+        SetObject(serialized, "developerStartPage", startWidgets.DeveloperPage);
+        SetObject(serialized, "experimenterTabButton", startWidgets.ExperimenterTab);
+        SetObject(serialized, "developerTabButton", startWidgets.DeveloperTab);
         SetObject(serialized, "warningText", warningText);
-        SetObject(serialized, "endSummaryText", endSummary);
+        SetObject(serialized, "endTitleText", endWidgets.Title);
+        SetObject(serialized, "endSummaryText", endWidgets.Summary);
+        SetObject(serialized, "nextBlockButton", endWidgets.NextBlock);
         SetObject(serialized, "retryButton", retry);
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
@@ -505,7 +595,14 @@ public static class StudyUISetupEditor
         }
 
         canvas.renderMode = RenderMode.WorldSpace;
-        canvas.worldCamera = Camera.main;
+        Camera presentationCamera = Camera.main != null ? Camera.main : canvas.worldCamera;
+        if (presentationCamera == null)
+        {
+            presentationCamera = Resources.FindObjectsOfTypeAll<Camera>()
+                .FirstOrDefault(item => item.gameObject.scene == EditorSceneManager.GetActiveScene() &&
+                                        item.gameObject.activeInHierarchy && item.enabled);
+        }
+        canvas.worldCamera = presentationCamera;
         RectTransform rect = canvas.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -513,12 +610,12 @@ public static class StudyUISetupEditor
         rect.anchoredPosition = Vector2.zero;
         rect.sizeDelta = new Vector2(1200, 800);
         rect.localScale = Vector3.one * 0.0015f;
-        if (Camera.main != null)
+        if (presentationCamera != null)
         {
-            Vector3 canvasPosition = Camera.main.transform.position + Camera.main.transform.forward * 2f;
-            canvasPosition.y = Mathf.Max(canvasPosition.y, 1f);
-            rect.position = canvasPosition;
-            rect.rotation = Camera.main.transform.rotation;
+            Transform cameraTransform = presentationCamera.transform;
+            rect.SetPositionAndRotation(
+                cameraTransform.position + cameraTransform.forward * 2f,
+                cameraTransform.rotation);
         }
 
         CanvasScaler scaler = GetOrAdd<CanvasScaler>(canvas.gameObject);
@@ -675,6 +772,36 @@ public static class StudyUISetupEditor
         return button;
     }
 
+    private static Button CreateIconButton(string name, Transform parent, bool developerIcon, bool selected)
+    {
+        Button button = CreateButton(name, parent, developerIcon ? "</>" : "", selected ? Primary : Secondary);
+        TMP_Text label = button.GetComponentInChildren<TMP_Text>();
+        if (label != null)
+        {
+            label.fontSize = developerIcon ? 20 : 1;
+            label.raycastTarget = false;
+        }
+
+        if (!developerIcon)
+        {
+            GameObject head = CreateUIObject("PersonHead", button.transform);
+            Image headImage = head.AddComponent<Image>();
+            headImage.color = PrimaryText;
+            ApplyRoundedSprite(headImage);
+            SetRect(head.GetComponent<RectTransform>(), new Vector2(0, 8), new Vector2(14, 14));
+            headImage.raycastTarget = false;
+
+            GameObject shoulders = CreateUIObject("PersonShoulders", button.transform);
+            Image shouldersImage = shoulders.AddComponent<Image>();
+            shouldersImage.color = PrimaryText;
+            ApplyRoundedSprite(shouldersImage);
+            SetRect(shoulders.GetComponent<RectTransform>(), new Vector2(0, -10), new Vector2(28, 14));
+            shouldersImage.raycastTarget = false;
+        }
+
+        return button;
+    }
+
     private static Toggle CreateToggle(string name, Transform parent, string label, ToggleGroup group, bool isOn)
     {
         GameObject root = CreateUIObject(name, parent);
@@ -746,14 +873,258 @@ public static class StudyUISetupEditor
             changed = true;
         }
 
-        Canvas canvas = UnityEngine.Object.FindObjectOfType<Canvas>(true);
-        if (canvas != null && canvas.GetComponent(trackedRaycasterType) == null)
+        GameObject studyCanvasObject = FindSceneObject("StudyCanvas");
+        Canvas canvas = studyCanvasObject != null ? studyCanvasObject.GetComponent<Canvas>() : null;
+        if (canvas != null)
         {
             GraphicRaycaster standard = canvas.GetComponent<GraphicRaycaster>();
-            if (standard != null) Undo.DestroyObjectImmediate(standard);
-            Undo.AddComponent(canvas.gameObject, trackedRaycasterType);
+            if (standard == null)
+            {
+                standard = Undo.AddComponent<GraphicRaycaster>(canvas.gameObject);
+                changed = true;
+            }
+            if (standard.ignoreReversedGraphics)
+            {
+                standard.ignoreReversedGraphics = false;
+                changed = true;
+            }
+            if (standard.enabled)
+            {
+                standard.enabled = false;
+                changed = true;
+            }
+            if (canvas.GetComponent(trackedRaycasterType) == null)
+            {
+                Undo.AddComponent(canvas.gameObject, trackedRaycasterType);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Keeps the live answer view on its own world-space canvas under the tracked left controller.
+    /// The other study views remain on StudyCanvas in front of the participant.
+    /// </summary>
+    public static bool ConfigureAnswerHandUIIfAvailable()
+    {
+        GameObject xrSetup = FindSceneObject("Quest XR Interaction Setup");
+        GameObject answerView = FindSceneObject("AnswerUIView");
+        Type trackedRaycasterType =
+            FindType("UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster");
+        if (xrSetup == null || answerView == null || trackedRaycasterType == null)
+        {
+            return false;
+        }
+
+        bool changed = false;
+
+        // Remove the obsolete camera-attached copy left by the earlier setup attempt.
+        GameObject[] duplicateViews = Resources.FindObjectsOfTypeAll<GameObject>()
+            .Where(item => item.scene == EditorSceneManager.GetActiveScene() &&
+                           item.name.StartsWith("AnswerUIView (", StringComparison.Ordinal))
+            .ToArray();
+        foreach (GameObject duplicateView in duplicateViews)
+        {
+            Undo.DestroyObjectImmediate(duplicateView);
             changed = true;
         }
+
+        Transform leftController = xrSetup.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "Left Controller");
+        Transform rightController = xrSetup.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "Right Controller");
+        Camera xrCamera = xrSetup.GetComponentInChildren<Camera>(true);
+        if (leftController == null || rightController == null || xrCamera == null)
+        {
+            return changed;
+        }
+
+        // The answer panel sits close to the left controller. Keep the right-hand ray's UI path
+        // active even if its physics cast also touches a nearby controller/interactable.
+        Type xrRayInteractorType = FindType("UnityEngine.XR.Interaction.Toolkit.XRRayInteractor");
+        Component rightRay = xrRayInteractorType == null
+            ? null
+            : rightController.GetComponentsInChildren(xrRayInteractorType, true)
+                .FirstOrDefault(item => item.gameObject.name == "Ray Interactor");
+        if (rightRay != null)
+        {
+            if (!rightRay.gameObject.activeSelf)
+            {
+                rightRay.gameObject.SetActive(true);
+                changed = true;
+            }
+            if (rightRay is Behaviour rightRayBehaviour && !rightRayBehaviour.enabled)
+            {
+                rightRayBehaviour.enabled = true;
+                changed = true;
+            }
+
+            SerializedObject rightRayProperties = new SerializedObject(rightRay);
+            SerializedProperty enableUI = rightRayProperties.FindProperty("m_EnableUIInteraction");
+            SerializedProperty blockUI = rightRayProperties.FindProperty("m_BlockUIOnInteractableSelection");
+            if (enableUI != null && !enableUI.boolValue)
+            {
+                enableUI.boolValue = true;
+                changed = true;
+            }
+            if (blockUI != null && blockUI.boolValue)
+            {
+                blockUI.boolValue = false;
+                changed = true;
+            }
+            rightRayProperties.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        RectTransform rect = answerView.GetComponent<RectTransform>();
+        bool newlyAttached = rect.parent != leftController;
+        if (newlyAttached)
+        {
+            Undo.SetTransformParent(rect, leftController, "Attach Answer UI to left controller");
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(1200f, 800f);
+            rect.localRotation = Quaternion.identity;
+            changed = true;
+        }
+
+        Vector3 targetPosition = new Vector3(0f, 0.10f, AnswerHandForwardOffset);
+        if ((rect.anchoredPosition3D - targetPosition).sqrMagnitude > Mathf.Epsilon)
+        {
+            Undo.RecordObject(rect, "Move Answer UI away from left controller");
+            rect.anchoredPosition3D = targetPosition;
+            changed = true;
+        }
+
+        Vector3 targetScale = Vector3.one * AnswerHandScale;
+        if ((rect.localScale - targetScale).sqrMagnitude > Mathf.Epsilon)
+        {
+            Undo.RecordObject(rect, "Resize Answer UI");
+            rect.localScale = targetScale;
+            changed = true;
+        }
+
+        Canvas answerCanvas = answerView.GetComponent<Canvas>();
+        if (answerCanvas == null)
+        {
+            answerCanvas = Undo.AddComponent<Canvas>(answerView);
+            changed = true;
+        }
+        answerCanvas.renderMode = RenderMode.WorldSpace;
+        if (answerCanvas.worldCamera != xrCamera)
+        {
+            answerCanvas.worldCamera = xrCamera;
+            changed = true;
+        }
+        answerCanvas.overrideSorting = true;
+        answerCanvas.sortingOrder = 1;
+
+        CanvasScaler scaler = answerView.GetComponent<CanvasScaler>();
+        if (scaler == null)
+        {
+            scaler = Undo.AddComponent<CanvasScaler>(answerView);
+            changed = true;
+        }
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.dynamicPixelsPerUnit = 16f;
+
+        GraphicRaycaster standard = answerView.GetComponent<GraphicRaycaster>();
+        if (standard == null)
+        {
+            standard = Undo.AddComponent<GraphicRaycaster>(answerView);
+            changed = true;
+        }
+        if (standard.ignoreReversedGraphics)
+        {
+            standard.ignoreReversedGraphics = false;
+            changed = true;
+        }
+        if (standard.enabled)
+        {
+            standard.enabled = false;
+            changed = true;
+        }
+        if (answerView.GetComponent(trackedRaycasterType) == null)
+        {
+            Undo.AddComponent(answerView, trackedRaycasterType);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(answerView);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        }
+        return changed;
+    }
+
+    private static bool EnsureNextBlockUI()
+    {
+        GameObject endView = FindSceneObject("EndUIView");
+        StudyUIController controller = UnityEngine.Object.FindObjectOfType<StudyUIController>(true);
+        if (endView == null || controller == null)
+        {
+            return false;
+        }
+
+        Transform card = endView.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "EndCard");
+        TMP_Text title = endView.GetComponentsInChildren<TMP_Text>(true)
+            .FirstOrDefault(item => item.name == "StudyCompleteReturnToStartButton");
+        TMP_Text summary = endView.GetComponentsInChildren<TMP_Text>(true)
+            .FirstOrDefault(item => item.name == "EndSummary");
+        TMP_Text instruction = endView.GetComponentsInChildren<TMP_Text>(true)
+            .FirstOrDefault(item => item.name == "EndInstruction");
+        if (card == null || title == null || summary == null)
+        {
+            return false;
+        }
+
+        bool changed = false;
+        Button nextBlock = endView.GetComponentsInChildren<Button>(true)
+            .FirstOrDefault(item => item.name == "NextBlockButton");
+        if (nextBlock == null)
+        {
+            RectTransform cardRect = card.GetComponent<RectTransform>();
+            Undo.RecordObject(cardRect, "Resize block end card");
+            cardRect.sizeDelta = new Vector2(920, 520);
+            SetRect(title.rectTransform, new Vector2(0, 140), new Vector2(820, 80));
+            SetRect(summary.rectTransform, new Vector2(0, 35), new Vector2(800, 110));
+            if (instruction != null)
+            {
+                SetRect(instruction.rectTransform, new Vector2(0, -55), new Vector2(800, 64));
+            }
+
+            nextBlock = CreateButton("NextBlockButton", card, "Next Block", Primary);
+            SetRect(nextBlock.GetComponent<RectTransform>(), new Vector2(0, -155), new Vector2(360, 82));
+            nextBlock.GetComponentInChildren<TMP_Text>().fontSize = 30;
+            UnityEventTools.AddPersistentListener(nextBlock.onClick, controller.OnNextBlockClicked);
+            nextBlock.gameObject.SetActive(false);
+            changed = true;
+        }
+
+        SerializedObject serialized = new SerializedObject(controller);
+        SerializedProperty titleProperty = serialized.FindProperty("endTitleText");
+        SerializedProperty summaryProperty = serialized.FindProperty("endSummaryText");
+        SerializedProperty buttonProperty = serialized.FindProperty("nextBlockButton");
+        if (titleProperty != null && titleProperty.objectReferenceValue != title)
+        {
+            titleProperty.objectReferenceValue = title;
+            changed = true;
+        }
+        if (summaryProperty != null && summaryProperty.objectReferenceValue != summary)
+        {
+            summaryProperty.objectReferenceValue = summary;
+            changed = true;
+        }
+        if (buttonProperty != null && buttonProperty.objectReferenceValue != nextBlock)
+        {
+            buttonProperty.objectReferenceValue = nextBlock;
+            changed = true;
+        }
+        serialized.ApplyModifiedPropertiesWithoutUndo();
 
         return changed;
     }
@@ -763,11 +1134,37 @@ public static class StudyUISetupEditor
         string[] required =
         {
             "StudyCanvas", "StartUIView", "AnswerUIView", "EndUIView", "FinishUIView", "WarningUIView",
+            "ExperimenterStartPage", "DeveloperStartPage", "ExperimenterTabButton", "DeveloperTabButton",
             "EventSystem"
         };
         string missing = string.Join(", ", required.Where(item => FindSceneObject(item) == null));
         StudyManager manager = UnityEngine.Object.FindObjectOfType<StudyManager>(true);
         StudyUIController controller = UnityEngine.Object.FindObjectOfType<StudyUIController>(true);
+        GameObject answerView = FindSceneObject("AnswerUIView");
+        bool answerAttachedToLeftController = answerView != null && answerView.GetComponent<Canvas>() != null &&
+                                              answerView.transform.parent != null &&
+                                              answerView.transform.parent.name == "Left Controller";
+        GameObject xrSetup = FindSceneObject("Quest XR Interaction Setup");
+        Transform rightController = xrSetup == null
+            ? null
+            : xrSetup.GetComponentsInChildren<Transform>(true)
+                .FirstOrDefault(item => item.name == "Right Controller");
+        Type xrRayInteractorType = FindType("UnityEngine.XR.Interaction.Toolkit.XRRayInteractor");
+        Component rightRay = rightController == null || xrRayInteractorType == null
+            ? null
+            : rightController.GetComponentsInChildren(xrRayInteractorType, true)
+                .FirstOrDefault(item => item.gameObject.name == "Ray Interactor");
+        bool rightRaySupportsUI = false;
+        if (rightRay != null)
+        {
+            SerializedObject rightRayProperties = new SerializedObject(rightRay);
+            SerializedProperty enableUI = rightRayProperties.FindProperty("m_EnableUIInteraction");
+            SerializedProperty blockUI = rightRayProperties.FindProperty("m_BlockUIOnInteractableSelection");
+            rightRaySupportsUI = rightRay.gameObject.activeInHierarchy &&
+                                 (!(rightRay is Behaviour behaviour) || behaviour.enabled) &&
+                                 enableUI != null && enableUI.boolValue &&
+                                 blockUI != null && !blockUI.boolValue;
+        }
         int missingManagerReferences = 0;
         if (manager != null)
         {
@@ -776,11 +1173,14 @@ public static class StudyUISetupEditor
             missingManagerReferences = properties.Count(property => serialized.FindProperty(property).objectReferenceValue == null);
         }
 
-        bool valid = string.IsNullOrEmpty(missing) && manager != null && controller != null && missingManagerReferences == 0;
+        bool valid = string.IsNullOrEmpty(missing) && manager != null && controller != null &&
+                     missingManagerReferences == 0 && answerAttachedToLeftController && rightRaySupportsUI;
         return valid
-            ? "PASS: all five UI views, controller, EventSystem, and StudyManager references are configured."
+            ? "PASS: all UI views, StudyManager references, the left-controller Answer UI, and right-hand UI selection are configured."
             : "FAIL: missing objects: " + (string.IsNullOrEmpty(missing) ? "none" : missing) +
-              "; missing manager references: " + missingManagerReferences + ".";
+              "; missing manager references: " + missingManagerReferences +
+              "; Answer UI attached to Left Controller: " + answerAttachedToLeftController +
+              "; right-hand UI ray ready: " + rightRaySupportsUI + ".";
     }
 
     private static void EnsureTmpEssentials()
@@ -857,36 +1257,60 @@ public static class StudyUISetupEditor
         rect.localScale = Vector3.one;
     }
 
+    private readonly struct StartViewWidgets
+    {
+        public readonly GameObject ExperimenterPage, DeveloperPage;
+        public readonly Button ExperimenterTab, DeveloperTab;
+        public readonly StartWidgets Experimenter, Developer;
+
+        public StartViewWidgets(GameObject experimenterPage, GameObject developerPage,
+            Button experimenterTab, Button developerTab, StartWidgets experimenter, StartWidgets developer)
+        {
+            ExperimenterPage = experimenterPage;
+            DeveloperPage = developerPage;
+            ExperimenterTab = experimenterTab;
+            DeveloperTab = developerTab;
+            Experimenter = experimenter;
+            Developer = developer;
+        }
+    }
+
     private readonly struct StartWidgets
     {
         public readonly TMP_InputField Participant, Block, Trial;
         public readonly Toggle Training, Formal;
         public readonly TMP_Text Message;
-        public readonly Button StartStudy;
+        public readonly Button StartStudy, RepairTrial;
         public StartWidgets(TMP_InputField participant, TMP_InputField block, TMP_InputField trial, Toggle training,
-            Toggle formal, TMP_Text message, Button startStudy)
+            Toggle formal, TMP_Text message, Button startStudy, Button repairTrial)
         {
             Participant = participant; Block = block; Trial = trial; Training = training; Formal = formal;
-            Message = message; StartStudy = startStudy;
+            Message = message; StartStudy = startStudy; RepairTrial = repairTrial;
         }
     }
 
     private readonly struct AnswerWidgets
     {
-        public readonly TMP_Text Phase, Block, Trial, Countdown, Message;
+        public readonly TMP_Text Phase, Block, Trial, Countdown, Question, Message;
         public readonly Button Left, Right, Submit, Next, Again, Formal;
-        public AnswerWidgets(TMP_Text phase, TMP_Text block, TMP_Text trial, TMP_Text countdown, TMP_Text message,
-            Button left, Button right, Button submit, Button next, Button again, Button formal)
+        public AnswerWidgets(TMP_Text phase, TMP_Text block, TMP_Text trial, TMP_Text countdown, TMP_Text question,
+            TMP_Text message, Button left, Button right, Button submit, Button next, Button again, Button formal)
         {
-            Phase = phase; Block = block; Trial = trial; Countdown = countdown; Message = message;
+            Phase = phase; Block = block; Trial = trial; Countdown = countdown; Question = question; Message = message;
             Left = left; Right = right; Submit = submit; Next = next; Again = again; Formal = formal;
         }
     }
 
     private readonly struct EndWidgets
     {
-        public readonly TMP_Text Summary;
-        public EndWidgets(TMP_Text summary) { Summary = summary; }
+        public readonly TMP_Text Title, Summary;
+        public readonly Button NextBlock;
+        public EndWidgets(TMP_Text title, TMP_Text summary, Button nextBlock)
+        {
+            Title = title;
+            Summary = summary;
+            NextBlock = nextBlock;
+        }
     }
 
     private readonly struct FinishWidgets
