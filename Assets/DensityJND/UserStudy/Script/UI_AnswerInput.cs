@@ -17,8 +17,6 @@ public class UI_AnswerInput : MonoBehaviour
     private const float FormalAnswerButtonY = 0f;
     private const float TrainingSubmitY = -130f;
     private const float FormalSubmitY = -210f;
-    private static readonly Vector2 PeripheralLeftIndicatorPosition = new Vector2(-480f, 80f);
-    private static readonly Vector2 PeripheralRightIndicatorPosition = new Vector2(480f, 80f);
     private static readonly Color FormalIndicatorIdle = new Color(0.204f, 0.204f, 0.216f, 0.92f);
     private static readonly Color FormalIndicatorSelected = new Color(0.071f, 0.412f, 0.788f, 1f);
     private static readonly Color ResultCorrect = new Color(0.220f, 0.647f, 0.408f, 1f);
@@ -125,7 +123,6 @@ public class UI_AnswerInput : MonoBehaviour
         if (formalHud != null) formalHud.SetActive(showFormalHud);
         if (trainingHud != null) trainingHud.SetActive(showTrainingHud);
         if (trainingReadyHud != null) trainingReadyHud.SetActive(false);
-        ApplyPeripheralIndicatorLayout();
         trainingUiState = TrainingUiState.Answering;
         trainingCorrectAnswer = 0;
         trainingReadyChoice = 0;
@@ -543,22 +540,6 @@ public class UI_AnswerInput : MonoBehaviour
         if (formalRightIndicator != null)
         {
             formalRightIndicator.color = currentAnswer == 2 ? FormalIndicatorSelected : FormalIndicatorIdle;
-        }
-    }
-
-    private void ApplyPeripheralIndicatorLayout()
-    {
-        SetIndicatorPosition(formalLeftIndicator, PeripheralLeftIndicatorPosition);
-        SetIndicatorPosition(formalRightIndicator, PeripheralRightIndicatorPosition);
-        SetIndicatorPosition(trainingLeftIndicator, PeripheralLeftIndicatorPosition);
-        SetIndicatorPosition(trainingRightIndicator, PeripheralRightIndicatorPosition);
-    }
-
-    private static void SetIndicatorPosition(Image indicator, Vector2 position)
-    {
-        if (indicator != null && indicator.rectTransform != null)
-        {
-            indicator.rectTransform.anchoredPosition = position;
         }
     }
 

@@ -45,7 +45,7 @@ public sealed class StudyUIController : MonoBehaviour
     [SerializeField] private GameObject warningUI;
 
     [Header("Presentation Placement")]
-    [SerializeField, Range(0f, 60f)] private float answerElevationDegrees = 0f;
+    [SerializeField, Range(0f, 60f)] private float answerElevationDegrees = 20f;
 
     [Header("Start Page Tabs")]
     [SerializeField] private GameObject experimenterStartPage;
@@ -474,8 +474,8 @@ public sealed class StudyUIController : MonoBehaviour
 
     /// <summary>
     /// Places the full-size study canvas in the participant's current horizontal direction.
-    /// An optional answer-only elevation remains available for headset tuning, while the
-    /// default layout keeps its choice indicators beside rather than over the stimuli.
+    /// During trials the answer view sits above the stimulus, so it only enters the centre of
+    /// view when the participant deliberately looks up.
     /// </summary>
     public void RecenterPresentationUI()
     {

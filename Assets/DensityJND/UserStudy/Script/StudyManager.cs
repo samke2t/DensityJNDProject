@@ -199,8 +199,8 @@ public class StudyManager : MonoBehaviour
         
         
         
-        trialCountPB = 100; // All_Without_30 的 Formal_OrderList 每个 order 包含 100 个 trial
-        trainingCountPB = 8; // 4 个 distance，每个 distance 2 个 training trial
+        trialCountPB = 60; // Final Formal_OrderList: 60 trials per order
+        trainingCountPB = 12; // Final Training_OrderList: 12 trials per order
 
         blockCount = 4; // 新的 Formal_Participant 定义了 4 个 block
         blockFolderName = new String[blockCount];
@@ -299,6 +299,40 @@ public class StudyManager : MonoBehaviour
     public void ResumeStudy(int participantId)
     {
         StartCoroutine(ResumeStudyRoutine(participantId));
+    }
+
+    public void CheckStudyProgress(int participantId)
+    {
+        StartCoroutine(CheckStudyProgressRoutine(participantId));
+    }
+
+    private IEnumerator CheckStudyProgressRoutine(int participantId)
+    {
+        yield return ParticipantInit(participantId, false, true);
+        if (!loadSuccess)
+        {
+            uiController?.SetStartBusy(false);
+            yield break;
+        }
+
+        bool hasResults = TryBuildRecoveryList(
+            out List<RedoTrial> pendingTrials,
+            out int validCount,
+            out string error);
+
+        int totalTrials = blockCount * trialCountPB;
+        if (!hasResults && error == "No saved study was found for this participant.")
+        {
+            startInput?.ShowDeveloperStatus($"Completed: 0 / {totalTrials}\nRemaining: {totalTrials}");
+        }
+        else
+        {
+            startInput?.ShowDeveloperStatus(hasResults
+                ? BuildRecoveryStatus(validCount, pendingTrials)
+                : error);
+        }
+
+        uiController?.SetStartBusy(false);
     }
 
     private IEnumerator ResumeStudyRoutine(int participantId)
@@ -933,7 +967,7 @@ public class StudyManager : MonoBehaviour
         {
             error = foundLegacyResultFile
                 ? "Only legacy 20-trial results were found for this participant.\n" +
-                  "Start a new Formal study for the current 120-trial protocol."
+                  "Start a new Formal study for the current 240-trial protocol."
                 : "No saved study was found for this participant.";
             pendingTrials.Clear();
             validCount = 0;
@@ -985,25 +1019,8 @@ public class StudyManager : MonoBehaviour
     private string BuildRecoveryStatus(int validCount, IReadOnlyList<RedoTrial> pendingTrials)
     {
         int totalTrials = blockCount * trialCountPB;
-        if (pendingTrials == null || pendingTrials.Count == 0)
-        {
-            return $"Valid: {validCount} / {totalTrials}\nPending: None";
-        }
-
-        if (blockCount == 1)
-        {
-            return $"Valid: {validCount} / {totalTrials}\nPending: Trial {FormatTrialNumbers(pendingTrials)}";
-        }
-
-        StringBuilder pending = new StringBuilder();
-        for (int index = 0; index < pendingTrials.Count; index++)
-        {
-            if (index > 0) pending.Append(", ");
-            RedoTrial trial = pendingTrials[index];
-            pending.Append($"B{trial.blockIndex + 1}/T{trial.trialIndex + 1}");
-        }
-
-        return $"Valid: {validCount} / {totalTrials}\nPending: {pending}";
+        int remainingCount = pendingTrials?.Count ?? Mathf.Max(0, totalTrials - validCount);
+        return $"Completed: {validCount} / {totalTrials}\nRemaining: {remainingCount}";
     }
 
     private static string FormatTrialNumbers(IReadOnlyList<RedoTrial> pendingTrials)
@@ -1053,8 +1070,7 @@ public class StudyManager : MonoBehaviour
     {
         string trainingConfigPath = Application.streamingAssetsPath + "/Config" + "/Training";
         trainingConfig = new ConfigInfo();
-        // Training questions are selected directly from the formal ±0.30 stimulus set.
-        trainingConfig.stimuliFolder = Application.streamingAssetsPath + "/Config/Formal/Stimuli";
+        trainingConfig.stimuliFolder = trainingConfigPath + "/Stimuli";
         trainingConfig.participantCsv = trainingConfigPath+ "/Training_Participant.csv";
         trainingConfig.orderListCsv = trainingConfigPath+ "/Training_OrderList.csv";
         trainingConfig.sceneCsv = trainingConfigPath+ "/Training_Scene.csv";
@@ -1190,7 +1206,7 @@ public class StudyManager : MonoBehaviour
 
         // Do not fall back to the legacy DensityJND_Block* folders. Those files
         // belong to the earlier 20-trial protocol and must not be interpreted as
-        // progress for the current 120-trial, distance-based protocol.
+        // progress for the current 240-trial, distance-based protocol.
 
         if (createFolder && !Directory.Exists(preferredFolder))
         {
@@ -1247,14 +1263,28 @@ public class StudyManager : MonoBehaviour
         if (!ValidateColumns(
                 participantHeader,
                 Path.GetFileName(participantCsv),
-                "ParticipantID",
-                "Training_Order"))
+                "ParticipantID"))
         {
             yield break;
         }
 
         int participantIdColumn = FindColumnIndex(participantHeader, "ParticipantID");
         int trainingOrderColumn = FindColumnIndex(participantHeader, "Training_Order");
+        if (trainingOrderColumn < 0)
+        {
+            // The final participant configuration uses the same block/order
+            // schema for training and formal data. Training runs once before
+            // formal testing, so it follows the participant's first block order.
+            trainingOrderColumn = FindColumnIndex(participantHeader, "Block1_Order");
+        }
+
+        if (trainingOrderColumn < 0)
+        {
+            ShowWarning($"{Path.GetFileName(participantCsv)} is missing the required column 'Block1_Order'.");
+            loadSuccess = false;
+            yield break;
+        }
+
         int trainingOrderId = -1;
 
         for (int lineIndex = 1; lineIndex < participantLines.Length; lineIndex++)

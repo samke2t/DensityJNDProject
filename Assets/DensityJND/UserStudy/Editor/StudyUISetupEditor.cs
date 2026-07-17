@@ -14,7 +14,7 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v55";
+    private const string MarkerName = "GeneratedCompleteUI_v56";
     private const float StartViewScale = 0.78f;
     private const float EndViewScale = 0.78f;
     private const string RoundedSpritePath =
@@ -319,6 +319,7 @@ public static class StudyUISetupEditor
         TMP_InputField trial = null;
         TMP_Text message;
         Button startStudy;
+        Button check = null;
         Button repairTrial = null;
         Toggle training = null;
         Toggle formal = null;
@@ -326,7 +327,11 @@ public static class StudyUISetupEditor
         if (isDeveloper)
         {
             participant = CreateInputField(prefix + "ParticipantIDInput", card.transform, "Participant ID");
-            SetRect(participant.GetComponent<RectTransform>(), new Vector2(-255, 110), new Vector2(420, 66));
+            SetRect(participant.GetComponent<RectTransform>(), new Vector2(-363, 110), new Vector2(204, 66));
+
+            check = CreateButton(prefix + "CheckButton", card.transform, "Check", Secondary);
+            SetRect(check.GetComponent<RectTransform>(), new Vector2(-147, 110), new Vector2(204, 66));
+            UnityEventTools.AddPersistentListener(check.onClick, inputHandler.OnDeveloperCheckClicked);
 
             startStudy = CreateButton(prefix + "ResumeStudyButton", card.transform, "Resume Study", Primary);
             SetRect(startStudy.GetComponent<RectTransform>(), new Vector2(-255, 20), new Vector2(420, 62));
@@ -405,7 +410,7 @@ public static class StudyUISetupEditor
         SetRect(back.GetComponent<RectTransform>(), new Vector2(390, -251), new Vector2(100, 72));
         UnityEventTools.AddPersistentListener(back.onClick, inputHandler.BackspaceNumericInput);
 
-        return new StartWidgets(participant, block, trial, training, formal, message, startStudy,
+        return new StartWidgets(participant, block, trial, training, formal, message, check, startStudy,
             repairTrial);
     }
 
@@ -480,7 +485,7 @@ public static class StudyUISetupEditor
 
         TMP_Text block = CreateText("FormalBlockText", hud.transform, "BLOCK 1 / 4", 26, FontStyles.Bold,
             new Vector2(-105, 330), new Vector2(240, 52));
-        TMP_Text trial = CreateText("FormalTrialText", hud.transform, "TRIAL 1 / 100", 26, FontStyles.Bold,
+        TMP_Text trial = CreateText("FormalTrialText", hud.transform, "TRIAL 1 / 60", 26, FontStyles.Bold,
             new Vector2(145, 330), new Vector2(260, 52));
 
         CreateText("FormalQuestionText", hud.transform,
@@ -491,10 +496,8 @@ public static class StudyUISetupEditor
             FontStyles.Bold, new Vector2(0, 195), new Vector2(360, 56));
         countdown.color = Error;
 
-        // Keep the choice feedback outside the two stimulus centres (approximately +/-10 degrees)
-        // so the HUD never covers the point clouds while the participant compares them.
-        Image left = CreateFormalIndicator("FormalLeftIndicator", hud.transform, "LEFT", new Vector2(-480, 80));
-        Image right = CreateFormalIndicator("FormalRightIndicator", hud.transform, "RIGHT", new Vector2(480, 80));
+        Image left = CreateFormalIndicator("FormalLeftIndicator", hud.transform, "LEFT", new Vector2(-205, 125));
+        Image right = CreateFormalIndicator("FormalRightIndicator", hud.transform, "RIGHT", new Vector2(205, 125));
 
         TMP_Text message = CreateText("FormalMessageText", hud.transform, "", 24, FontStyles.Normal,
             new Vector2(0, 68), new Vector2(760, 46));
@@ -529,7 +532,7 @@ public static class StudyUISetupEditor
         phase.alignment = TextAlignmentOptions.MidlineLeft;
         TMP_Text block = CreateText("TrainingBlockText", hud.transform, "BLOCK 1 / 4", 26, FontStyles.Bold,
             new Vector2(-105, 330), new Vector2(240, 52));
-        TMP_Text trial = CreateText("TrainingTrialText", hud.transform, "TRIAL 1 / 2", 26, FontStyles.Bold,
+        TMP_Text trial = CreateText("TrainingTrialText", hud.transform, "TRIAL 1 / 12", 26, FontStyles.Bold,
             new Vector2(145, 330), new Vector2(260, 52));
 
         CreateText("TrainingQuestionText", hud.transform,
@@ -540,8 +543,8 @@ public static class StudyUISetupEditor
             FontStyles.Bold, new Vector2(0, 195), new Vector2(360, 56));
         countdown.color = Error;
 
-        Image left = CreateFormalIndicator("TrainingLeftIndicator", hud.transform, "LEFT", new Vector2(-480, 80));
-        Image right = CreateFormalIndicator("TrainingRightIndicator", hud.transform, "RIGHT", new Vector2(480, 80));
+        Image left = CreateFormalIndicator("TrainingLeftIndicator", hud.transform, "LEFT", new Vector2(-205, 125));
+        Image right = CreateFormalIndicator("TrainingRightIndicator", hud.transform, "RIGHT", new Vector2(205, 125));
 
         TMP_Text feedback = CreateText("TrainingFeedbackText", hud.transform, "", 27, FontStyles.Bold,
             new Vector2(0, 68), new Vector2(420, 46));
@@ -660,6 +663,7 @@ public static class StudyUISetupEditor
         SetObject(serialized, "developerBlockIDInput", widgets.Developer.Block);
         SetObject(serialized, "developerTrialIDInput", widgets.Developer.Trial);
         SetObject(serialized, "developerMessageText", widgets.Developer.Message);
+        SetObject(serialized, "developerCheckButton", widgets.Developer.Check);
         SetObject(serialized, "developerResumeStudyButton", widgets.Developer.StartStudy);
         SetObject(serialized, "developerRepairTrialButton", widgets.Developer.RepairTrial);
         SetObject(serialized, "readyConfirmationView", widgets.ReadyConfirmation.View);
@@ -1578,12 +1582,12 @@ public static class StudyUISetupEditor
         public readonly TMP_InputField Participant, Block, Trial;
         public readonly Toggle Training, Formal;
         public readonly TMP_Text Message;
-        public readonly Button StartStudy, RepairTrial;
+        public readonly Button Check, StartStudy, RepairTrial;
         public StartWidgets(TMP_InputField participant, TMP_InputField block, TMP_InputField trial, Toggle training,
-            Toggle formal, TMP_Text message, Button startStudy, Button repairTrial)
+            Toggle formal, TMP_Text message, Button check, Button startStudy, Button repairTrial)
         {
             Participant = participant; Block = block; Trial = trial; Training = training; Formal = formal;
-            Message = message; StartStudy = startStudy; RepairTrial = repairTrial;
+            Message = message; Check = check; StartStudy = startStudy; RepairTrial = repairTrial;
         }
     }
 

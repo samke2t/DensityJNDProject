@@ -54,6 +54,7 @@ public class UI_StartInput : MonoBehaviour
     [SerializeField] private TMP_InputField developerBlockIDInput;
     [SerializeField] private TMP_InputField developerTrialIDInput;
     [SerializeField] private TMP_Text developerMessageText;
+    [SerializeField] private Button developerCheckButton;
     [SerializeField] private Button developerResumeStudyButton;
     [SerializeField] private Button developerRepairTrialButton;
 
@@ -166,6 +167,27 @@ public class UI_StartInput : MonoBehaviour
         lastStartAction = StartAction.DeveloperResume;
         LastRequestWasFormal = true;
         QueueStartConfirmation(participantID, 0, 0, true);
+    }
+
+    public void OnDeveloperCheckClicked()
+    {
+        if (studyManager == null)
+        {
+            ShowDeveloperStatus("Study Manager is not available.");
+            return;
+        }
+
+        if (developerParticipantIDInput == null ||
+            !int.TryParse(developerParticipantIDInput.text, out int participantID) ||
+            participantID < MinimumParticipantId || participantID > MaximumParticipantId)
+        {
+            ShowDeveloperStatus($"Please enter a participant ID between {MinimumParticipantId} and {MaximumParticipantId}.");
+            return;
+        }
+
+        ShowDeveloperStatus("Checking saved answers...");
+        SetInteractable(false);
+        studyManager.CheckStudyProgress(participantID);
     }
 
     public void OnDeveloperRepairTrialClicked()
@@ -390,6 +412,7 @@ public class UI_StartInput : MonoBehaviour
         if (developerParticipantIDInput != null) developerParticipantIDInput.interactable = interactable;
         if (developerBlockIDInput != null) developerBlockIDInput.interactable = interactable;
         if (developerTrialIDInput != null) developerTrialIDInput.interactable = interactable;
+        if (developerCheckButton != null) developerCheckButton.interactable = interactable;
         if (developerResumeStudyButton != null) developerResumeStudyButton.interactable = interactable;
         if (developerRepairTrialButton != null) developerRepairTrialButton.interactable = interactable;
         if (readyConfirmationButton != null) readyConfirmationButton.interactable = interactable;
