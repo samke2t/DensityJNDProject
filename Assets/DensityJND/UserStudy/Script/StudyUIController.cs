@@ -1,7 +1,12 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.XR;
+#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+using UnityEngine.InputSystem;
+#endif
 #if UNITY_EDITOR
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
@@ -39,6 +44,9 @@ public sealed class StudyUIController : MonoBehaviour
     [SerializeField] private GameObject finishUI;
     [SerializeField] private GameObject warningUI;
 
+    [Header("Presentation Placement")]
+    [SerializeField, Range(0f, 60f)] private float answerElevationDegrees = 0f;
+
     [Header("Start Page Tabs")]
     [SerializeField] private GameObject experimenterStartPage;
     [SerializeField] private GameObject developerStartPage;
@@ -58,6 +66,18 @@ public sealed class StudyUIController : MonoBehaviour
     private StudyManager.StudyPhase observedPhase = (StudyManager.StudyPhase)(-1);
     private bool applicationQuitting;
     private Coroutine presentationRecenterRoutine;
+    private bool recenterStimulusWhenHeadPoseIsReady;
+    private UnityEngine.XR.InputDevice leftHandDevice;
+    private UnityEngine.XR.InputDevice rightHandDevice;
+    private bool previousAnyTrigger;
+    private bool confirmationTriggerArmed;
+    private readonly List<XRInputSubsystem> subscribedInputSubsystems = new List<XRInputSubsystem>();
+    private readonly List<XRInputSubsystem> discoveredInputSubsystems = new List<XRInputSubsystem>();
+
+    private void OnEnable()
+    {
+        SubscribeToXRTrackingOriginUpdates();
+    }
 
     private void Awake()
     {
@@ -96,11 +116,11 @@ public sealed class StudyUIController : MonoBehaviour
             return;
         }
 
-        GameObject handMountedAnswerUI = answerUI;
+        GameObject authoredAnswerUI = answerUI;
         answerUI = preview;
-        if (handMountedAnswerUI != null && handMountedAnswerUI != preview)
+        if (authoredAnswerUI != null && authoredAnswerUI != preview)
         {
-            handMountedAnswerUI.SetActive(false);
+            authoredAnswerUI.SetActive(false);
         }
 
         if (studyManager != null)
@@ -180,6 +200,39 @@ public sealed class StudyUIController : MonoBehaviour
     private void OnDestroy()
     {
         Application.logMessageReceived -= HandleLogMessage;
+        UnsubscribeFromXRTrackingOriginUpdates();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromXRTrackingOriginUpdates();
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        // The Quest system menu temporarily removes focus while the user holds the Meta
+        // button to reset view. Re-acquire the subsystem and place app content using the
+        // new head pose after focus returns.
+        SubscribeToXRTrackingOriginUpdates();
+        RequestPresentationRecenter(true);
+    }
+
+    private void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        // Quest can pause an app while the headset is removed. A new participant may put
+        // it on at a different position and facing direction, so treat resume as a handoff.
+        SubscribeToXRTrackingOriginUpdates();
+        RequestPresentationRecenter(true);
     }
 
     private void OnApplicationQuit()
@@ -189,6 +242,8 @@ public sealed class StudyUIController : MonoBehaviour
 
     private void Update()
     {
+        PollStandaloneConfirmationTrigger();
+
         if (studyManager == null || observedPhase == studyManager.currentPhase)
         {
             return;
@@ -213,6 +268,69 @@ public sealed class StudyUIController : MonoBehaviour
                 ShowFinished();
                 break;
         }
+    }
+
+    private void PollStandaloneConfirmationTrigger()
+    {
+        if (!leftHandDevice.isValid)
+        {
+            leftHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
+        }
+        if (!rightHandDevice.isValid)
+        {
+            rightHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        }
+
+        bool anyTrigger = ReadButton(leftHandDevice, UnityEngine.XR.CommonUsages.triggerButton) ||
+                          ReadButton(rightHandDevice, UnityEngine.XR.CommonUsages.triggerButton);
+#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            anyTrigger |= keyboard.spaceKey.isPressed || keyboard.enterKey.isPressed;
+        }
+#endif
+
+        bool canConfirmBlock = CurrentState == ViewState.BlockEnd && nextBlockButton != null &&
+                               nextBlockButton.isActiveAndEnabled && nextBlockButton.interactable;
+        bool canConfirmWarning = CurrentState == ViewState.Warning;
+        if (!canConfirmBlock && !canConfirmWarning)
+        {
+            confirmationTriggerArmed = false;
+            previousAnyTrigger = anyTrigger;
+            return;
+        }
+
+        if (!confirmationTriggerArmed)
+        {
+            confirmationTriggerArmed = !anyTrigger;
+        }
+
+        bool triggerPressed = confirmationTriggerArmed && anyTrigger && !previousAnyTrigger;
+        previousAnyTrigger = anyTrigger;
+        if (!triggerPressed)
+        {
+            return;
+        }
+
+        confirmationTriggerArmed = false;
+        if (canConfirmBlock)
+        {
+            OnNextBlockClicked();
+        }
+        else if (retryButton != null && retryButton.isActiveAndEnabled && retryButton.interactable)
+        {
+            RetryLastAction();
+        }
+        else
+        {
+            DismissWarning();
+        }
+    }
+
+    private static bool ReadButton(UnityEngine.XR.InputDevice device, InputFeatureUsage<bool> usage)
+    {
+        return device.isValid && device.TryGetFeatureValue(usage, out bool pressed) && pressed;
     }
 
     public void ShowStart()
@@ -355,8 +473,9 @@ public sealed class StudyUIController : MonoBehaviour
     }
 
     /// <summary>
-    /// Places the full-size study canvas in the participant's current view. This can also be
-    /// connected to a recenter button if one is added later.
+    /// Places the full-size study canvas in the participant's current horizontal direction.
+    /// An optional answer-only elevation remains available for headset tuning, while the
+    /// default layout keeps its choice indicators beside rather than over the stimuli.
     /// </summary>
     public void RecenterPresentationUI()
     {
@@ -368,24 +487,50 @@ public sealed class StudyUIController : MonoBehaviour
         }
 
         Transform head = presentationCamera.transform;
-        Vector3 forward = head.forward;
-        if (!IsFinite(head.position) || !IsFinite(forward) || forward.sqrMagnitude < 0.5f)
+        Vector3 forward = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+        if (!IsFinite(head.position) || !IsFinite(forward) || forward.sqrMagnitude < 0.0001f)
         {
             return;
         }
 
+        forward.Normalize();
+        float elevation = CurrentState == ViewState.Answering ? answerElevationDegrees : 0f;
+        float elevationRadians = elevation * Mathf.Deg2Rad;
+        Vector3 presentationDirection =
+            forward * Mathf.Cos(elevationRadians) + Vector3.up * Mathf.Sin(elevationRadians);
+        Quaternion presentationRotation = Quaternion.LookRotation(presentationDirection, Vector3.up);
         presentationCanvas.transform.SetPositionAndRotation(
-            head.position + forward.normalized * PresentationDistance,
-            head.rotation);
+            head.position + presentationDirection * PresentationDistance,
+            presentationRotation);
     }
 
-    private void RequestPresentationRecenter()
+    /// <summary>
+    /// Recenters Quest/OpenXR tracking when supported, then moves the study UI and any
+    /// currently visible stimulus to the participant's new horizontal forward direction.
+    /// This method can also be connected to an in-app Button OnClick event.
+    /// </summary>
+    public void RecenterTrackingAndPresentation()
+    {
+        SubscribeToXRTrackingOriginUpdates();
+        foreach (XRInputSubsystem subsystem in subscribedInputSubsystems)
+        {
+            if (subsystem != null && subsystem.running)
+            {
+                subsystem.TryRecenter();
+            }
+        }
+
+        RequestPresentationRecenter(true);
+    }
+
+    private void RequestPresentationRecenter(bool includeVisibleStimulus = false)
     {
         if (!isActiveAndEnabled)
         {
             return;
         }
 
+        recenterStimulusWhenHeadPoseIsReady |= includeVisibleStimulus;
         if (presentationRecenterRoutine != null)
         {
             StopCoroutine(presentationRecenterRoutine);
@@ -423,7 +568,48 @@ public sealed class StudyUIController : MonoBehaviour
             }
         }
 
+        if (recenterStimulusWhenHeadPoseIsReady)
+        {
+            studyManager?.RecenterVisibleStimulus();
+            recenterStimulusWhenHeadPoseIsReady = false;
+        }
         presentationRecenterRoutine = null;
+    }
+
+    private void SubscribeToXRTrackingOriginUpdates()
+    {
+        discoveredInputSubsystems.Clear();
+        SubsystemManager.GetInstances(discoveredInputSubsystems);
+
+        foreach (XRInputSubsystem subsystem in discoveredInputSubsystems)
+        {
+            if (subsystem == null || subscribedInputSubsystems.Contains(subsystem))
+            {
+                continue;
+            }
+
+            subsystem.trackingOriginUpdated += HandleTrackingOriginUpdated;
+            subscribedInputSubsystems.Add(subsystem);
+        }
+    }
+
+    private void UnsubscribeFromXRTrackingOriginUpdates()
+    {
+        foreach (XRInputSubsystem subsystem in subscribedInputSubsystems)
+        {
+            if (subsystem != null)
+            {
+                subsystem.trackingOriginUpdated -= HandleTrackingOriginUpdated;
+            }
+        }
+        subscribedInputSubsystems.Clear();
+    }
+
+    private void HandleTrackingOriginUpdated(XRInputSubsystem subsystem)
+    {
+        // OpenXR raises this when the runtime changes the reference-space origin, including
+        // the Quest system Reset View action. Wait for the new pose before moving content.
+        RequestPresentationRecenter(true);
     }
 
     private Canvas FindPresentationCanvas()

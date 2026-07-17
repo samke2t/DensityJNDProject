@@ -1,6 +1,10 @@
 ﻿using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.XR;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 public class UI_AnswerInput : MonoBehaviour
 {
@@ -9,10 +13,16 @@ public class UI_AnswerInput : MonoBehaviour
     private const string GreaterCopy = "Greater\n更大";
     private const string SmallerCopy = "Smaller\n更小";
     private const string BilingualFontResource = "Fonts/NotoSansSC-AnswerTMP";
-    private const float TrainingAnswerButtonY = -45f;
-    private const float FormalAnswerButtonY = 55f;
+    private const float TrainingAnswerButtonY = 35f;
+    private const float FormalAnswerButtonY = 0f;
     private const float TrainingSubmitY = -130f;
     private const float FormalSubmitY = -210f;
+    private static readonly Vector2 PeripheralLeftIndicatorPosition = new Vector2(-480f, 80f);
+    private static readonly Vector2 PeripheralRightIndicatorPosition = new Vector2(480f, 80f);
+    private static readonly Color FormalIndicatorIdle = new Color(0.204f, 0.204f, 0.216f, 0.92f);
+    private static readonly Color FormalIndicatorSelected = new Color(0.071f, 0.412f, 0.788f, 1f);
+    private static readonly Color ResultCorrect = new Color(0.220f, 0.647f, 0.408f, 1f);
+    private static readonly Color ResultIncorrect = new Color(0.878f, 0.337f, 0.380f, 1f);
     private static TMP_FontAsset bilingualFontAsset;
 
     #region =============== Inspector Configuration ===============
@@ -26,7 +36,7 @@ public class UI_AnswerInput : MonoBehaviour
     [SerializeField] private TMP_Text phaseText;           // 只显示 Training，Formal，Redo
     [SerializeField] private TMP_Text blockText;           // 多 Block 实验时显示当前 Block
     [SerializeField] private TMP_Text trialText;           // 这个 Block 的第几个 trial
-    [SerializeField] private TMP_Text countdownText;       // 这个 Trial 的倒计时
+    [SerializeField] private TMP_Text countdownText;       // Current trial countdown
     [SerializeField] private TMP_Text messageText;         // 提示文本
     [SerializeField] private TMP_Text questionText;        // 中英文密度判断问题
 
@@ -36,8 +46,34 @@ public class UI_AnswerInput : MonoBehaviour
     [SerializeField] private Button rightButton;
     [SerializeField] private Button submitButton;
     [SerializeField] private Button nextButton;
-    [SerializeField] private Button trainingAgainButton; 
+    [SerializeField] private Button trainingAgainButton;
     [SerializeField] private Button startFormalButton;
+
+    [Header("Formal HUD")]
+    [SerializeField] private GameObject trainingPanel;
+    [SerializeField] private GameObject formalHud;
+    [SerializeField] private TMP_Text formalBlockText;
+    [SerializeField] private TMP_Text formalTrialText;
+    [SerializeField] private TMP_Text formalCountdownText;
+    [SerializeField] private TMP_Text formalMessageText;
+    [SerializeField] private Image formalLeftIndicator;
+    [SerializeField] private Image formalRightIndicator;
+
+    [Header("Training HUD")]
+    [SerializeField] private GameObject trainingHud;
+    [SerializeField] private TMP_Text trainingBlockText;
+    [SerializeField] private TMP_Text trainingTrialText;
+    [SerializeField] private TMP_Text trainingCountdownText;
+    [SerializeField] private TMP_Text trainingFeedbackText;
+    [SerializeField] private TMP_Text trainingMessageText;
+    [SerializeField] private Image trainingLeftIndicator;
+    [SerializeField] private Image trainingRightIndicator;
+
+    [Header("Training Complete")]
+    [SerializeField] private GameObject trainingReadyHud;
+    [SerializeField] private Image trainingReadyNoIndicator;
+    [SerializeField] private Image trainingReadyYesIndicator;
+    [SerializeField] private TMP_Text trainingReadyMessageText;
 
     #endregion ====================================================
 
@@ -49,6 +85,26 @@ public class UI_AnswerInput : MonoBehaviour
     private ColorBlock rightDefaultColors;
     private TMP_Text leftLabelText;
     private TMP_Text rightLabelText;
+    private UnityEngine.XR.InputDevice leftHandDevice;
+    private UnityEngine.XR.InputDevice rightHandDevice;
+    private bool previousLeftPrimary;
+    private bool previousLeftSecondary;
+    private bool previousRightPrimary;
+    private bool previousRightSecondary;
+    private bool previousAnyTrigger;
+    private bool submitInputArmed;
+    private int trainingCorrectAnswer;
+    private int trainingReadyChoice;
+
+    private enum TrainingUiState
+    {
+        Answering,
+        Feedback,
+        ReadyForFormal,
+        Transitioning
+    }
+
+    private TrainingUiState trainingUiState = TrainingUiState.Answering;
 
     #endregion ====================================================
 
@@ -61,14 +117,34 @@ public class UI_AnswerInput : MonoBehaviour
         currentAnswer = 0;
         ApplyAnswerCopy();
 
+        bool showFormalHud =
+            studyManager.currentPhase == StudyManager.StudyPhase.Formal ||
+            studyManager.currentPhase == StudyManager.StudyPhase.Redo;
+        bool showTrainingHud = studyManager.currentPhase == StudyManager.StudyPhase.Training;
+        if (trainingPanel != null) trainingPanel.SetActive(!showFormalHud && !showTrainingHud);
+        if (formalHud != null) formalHud.SetActive(showFormalHud);
+        if (trainingHud != null) trainingHud.SetActive(showTrainingHud);
+        if (trainingReadyHud != null) trainingReadyHud.SetActive(false);
+        ApplyPeripheralIndicatorLayout();
+        trainingUiState = TrainingUiState.Answering;
+        trainingCorrectAnswer = 0;
+        trainingReadyChoice = 0;
+        submitInputArmed = false;
+
         if (messageText != null) messageText.text = "";
-        
+        if (formalMessageText != null) formalMessageText.text = "";
+        if (trainingMessageText != null) trainingMessageText.text = "";
+        if (trainingFeedbackText != null) trainingFeedbackText.text = "";
+        if (trainingReadyMessageText != null) trainingReadyMessageText.text = "";
+
         // 注：给用户看都是从 1 开始数
 
         if (phaseText != null) phaseText.text = studyManager.CurrentPhaseLabel;
         if (blockText != null)
         {
-            blockText.gameObject.SetActive(studyManager.BlockCount > 1);
+            blockText.gameObject.SetActive(
+                studyManager.currentPhase != StudyManager.StudyPhase.Training &&
+                studyManager.BlockCount > 1);
             blockText.text = "Block " + (studyManager.currentBlock + 1);
         }
         if (trialText != null)
@@ -79,7 +155,27 @@ public class UI_AnswerInput : MonoBehaviour
             trialText.text = "Trial " + (trial + 1);
         }
 
+        if (formalBlockText != null)
+        {
+            formalBlockText.text = $"BLOCK {studyManager.currentBlock + 1} / {studyManager.BlockCount}";
+        }
+        if (formalTrialText != null)
+        {
+            formalTrialText.text = $"TRIAL {studyManager.currentFormalTrial + 1} / {studyManager.FormalTrialCount}";
+        }
+        if (trainingBlockText != null)
+        {
+            trainingBlockText.gameObject.SetActive(false);
+        }
+        if (trainingTrialText != null)
+        {
+            trainingTrialText.text = $"TRIAL {studyManager.currentTrainingTrial + 1} / {studyManager.TrainingTrialCount}";
+        }
+
         ResetAnswerColors();
+        UpdateFormalSelectionIndicators();
+        UpdateTrainingSelectionIndicators();
+        UpdateTrainingReadyIndicators();
         SetAnswerButtonsInteractable(true);
         if (submitButton != null) submitButton.interactable = true;
         UpdateAnswerButtonPositions();
@@ -104,12 +200,21 @@ public class UI_AnswerInput : MonoBehaviour
 
     public void ShowCorrect(int correctId)
     {
+        trainingCorrectAnswer = correctId;
+        trainingUiState = TrainingUiState.Feedback;
+        UpdateTrainingResultIndicators();
+        if (trainingFeedbackText != null)
+        {
+            bool correct = currentAnswer == correctId;
+            trainingFeedbackText.text = correct ? "CORRECT" : "INCORRECT";
+            trainingFeedbackText.color = correct ? ResultCorrect : ResultIncorrect;
+        }
         ApplyResultColor(leftButton, 1, correctId);
         ApplyResultColor(rightButton, 2, correctId);
     }
-    
-    
-    
+
+
+
     #endregion ====================================================
 
 
@@ -214,19 +319,30 @@ public class UI_AnswerInput : MonoBehaviour
         }
         return bilingualFontAsset;
     }
-    
-    
+
+
     private void Update()
     {
         if (studyManager == null)
         {
             if (countdownText != null) countdownText.text = "";
+            if (formalCountdownText != null) formalCountdownText.text = "";
+            if (trainingCountdownText != null) trainingCountdownText.text = "";
             return;
+        }
+
+        if (studyManager.currentPhase == StudyManager.StudyPhase.Formal ||
+            studyManager.currentPhase == StudyManager.StudyPhase.Training ||
+            studyManager.currentPhase == StudyManager.StudyPhase.Redo)
+        {
+            PollControllerInput();
         }
 
         if (studyManager.trialStartTime < 0f)
         {
             if (countdownText != null) countdownText.text = "";
+            if (formalCountdownText != null) formalCountdownText.text = "";
+            if (trainingCountdownText != null) trainingCountdownText.text = "";
             return;
         }
 
@@ -234,15 +350,20 @@ public class UI_AnswerInput : MonoBehaviour
 
         if (remainingTime > 0f)
         {
-            if (countdownText != null) countdownText.text = Mathf.CeilToInt(remainingTime).ToString();
+            int seconds = Mathf.CeilToInt(remainingTime);
+            if (countdownText != null) countdownText.text = seconds.ToString();
+            if (formalCountdownText != null) formalCountdownText.text = $"COUNTDOWN: {seconds}";
+            if (trainingCountdownText != null) trainingCountdownText.text = $"COUNTDOWN: {seconds}";
         }
         else
         {
             if (countdownText != null) countdownText.text = "";
+            if (formalCountdownText != null) formalCountdownText.text = "";
+            if (trainingCountdownText != null) trainingCountdownText.text = "";
         }
     }
-    
-    
+
+
 
     #endregion ====================================================
 
@@ -265,9 +386,28 @@ public class UI_AnswerInput : MonoBehaviour
 
     public void OnSubmitClicked()
     {
+        if (studyManager != null && studyManager.currentPhase == StudyManager.StudyPhase.Training &&
+            trainingUiState != TrainingUiState.Answering)
+        {
+            return;
+        }
+
         if (currentAnswer == 0)
         {
-            if (messageText != null) messageText.text = "Please select an answer.";
+            if (studyManager != null &&
+                (studyManager.currentPhase == StudyManager.StudyPhase.Formal ||
+                 studyManager.currentPhase == StudyManager.StudyPhase.Redo))
+            {
+                if (formalMessageText != null) formalMessageText.text = "Please select a point cloud first.";
+            }
+            else if (studyManager != null && studyManager.currentPhase == StudyManager.StudyPhase.Training)
+            {
+                if (trainingMessageText != null) trainingMessageText.text = "Please select a point cloud first.";
+            }
+            else if (messageText != null)
+            {
+                messageText.text = "Please select an answer.";
+            }
             return;
         }
 
@@ -335,9 +475,9 @@ public class UI_AnswerInput : MonoBehaviour
         if (rect == null) return;
 
         Vector2 position = rect.anchoredPosition;
-        position.y = studyManager.currentPhase == StudyManager.StudyPhase.Formal
-            ? FormalSubmitY
-            : TrainingSubmitY;
+        position.y = studyManager.currentPhase == StudyManager.StudyPhase.Training
+            ? TrainingSubmitY
+            : FormalSubmitY;
         rect.anchoredPosition = position;
     }
 
@@ -380,6 +520,8 @@ public class UI_AnswerInput : MonoBehaviour
     private void UpdateSelectionColors()
     {
         ResetAnswerColors();
+        UpdateFormalSelectionIndicators();
+        UpdateTrainingSelectionIndicators();
         Button selected = currentAnswer == 1 ? leftButton : rightButton;
         if (selected == null) return;
 
@@ -388,7 +530,225 @@ public class UI_AnswerInput : MonoBehaviour
         colors.selectedColor = colors.normalColor;
         selected.colors = colors;
         if (messageText != null) messageText.text = "";
+        if (formalMessageText != null) formalMessageText.text = "";
+        if (trainingMessageText != null) trainingMessageText.text = "";
     }
+
+    private void UpdateFormalSelectionIndicators()
+    {
+        if (formalLeftIndicator != null)
+        {
+            formalLeftIndicator.color = currentAnswer == 1 ? FormalIndicatorSelected : FormalIndicatorIdle;
+        }
+        if (formalRightIndicator != null)
+        {
+            formalRightIndicator.color = currentAnswer == 2 ? FormalIndicatorSelected : FormalIndicatorIdle;
+        }
+    }
+
+    private void ApplyPeripheralIndicatorLayout()
+    {
+        SetIndicatorPosition(formalLeftIndicator, PeripheralLeftIndicatorPosition);
+        SetIndicatorPosition(formalRightIndicator, PeripheralRightIndicatorPosition);
+        SetIndicatorPosition(trainingLeftIndicator, PeripheralLeftIndicatorPosition);
+        SetIndicatorPosition(trainingRightIndicator, PeripheralRightIndicatorPosition);
+    }
+
+    private static void SetIndicatorPosition(Image indicator, Vector2 position)
+    {
+        if (indicator != null && indicator.rectTransform != null)
+        {
+            indicator.rectTransform.anchoredPosition = position;
+        }
+    }
+
+    private void UpdateTrainingSelectionIndicators()
+    {
+        if (trainingUiState != TrainingUiState.Answering)
+        {
+            return;
+        }
+
+        if (trainingLeftIndicator != null)
+        {
+            trainingLeftIndicator.color = currentAnswer == 1 ? FormalIndicatorSelected : FormalIndicatorIdle;
+        }
+        if (trainingRightIndicator != null)
+        {
+            trainingRightIndicator.color = currentAnswer == 2 ? FormalIndicatorSelected : FormalIndicatorIdle;
+        }
+    }
+
+    private void UpdateTrainingResultIndicators()
+    {
+        if (trainingLeftIndicator != null)
+        {
+            trainingLeftIndicator.color = TrainingResultColor(1);
+        }
+        if (trainingRightIndicator != null)
+        {
+            trainingRightIndicator.color = TrainingResultColor(2);
+        }
+    }
+
+    private Color TrainingResultColor(int answerId)
+    {
+        if (answerId == trainingCorrectAnswer) return ResultCorrect;
+        if (answerId == currentAnswer) return ResultIncorrect;
+        return FormalIndicatorIdle;
+    }
+
+    private void UpdateTrainingReadyIndicators()
+    {
+        if (trainingReadyNoIndicator != null)
+        {
+            trainingReadyNoIndicator.color = trainingReadyChoice == 1
+                ? FormalIndicatorSelected
+                : FormalIndicatorIdle;
+        }
+        if (trainingReadyYesIndicator != null)
+        {
+            trainingReadyYesIndicator.color = trainingReadyChoice == 2
+                ? FormalIndicatorSelected
+                : FormalIndicatorIdle;
+        }
+    }
+
+    private void ShowTrainingReadyPage()
+    {
+        trainingUiState = TrainingUiState.ReadyForFormal;
+        trainingReadyChoice = 0;
+        if (trainingHud != null) trainingHud.SetActive(false);
+        if (trainingReadyHud != null) trainingReadyHud.SetActive(true);
+        if (trainingReadyMessageText != null) trainingReadyMessageText.text = "";
+        UpdateTrainingReadyIndicators();
+        studyManager.HideCurrentStimulus();
+        submitInputArmed = false;
+    }
+
+    private void ConfirmTrainingReadyChoice()
+    {
+        if (trainingReadyChoice == 0)
+        {
+            if (trainingReadyMessageText != null)
+            {
+                trainingReadyMessageText.text = "Please select an option first.";
+            }
+            return;
+        }
+
+        if (trainingReadyChoice == 1)
+        {
+            trainingUiState = TrainingUiState.Transitioning;
+            submitInputArmed = false;
+            studyManager.RestartTraining();
+        }
+        else
+        {
+            trainingUiState = TrainingUiState.Transitioning;
+            submitInputArmed = false;
+            if (trainingReadyMessageText != null)
+            {
+                trainingReadyMessageText.text = "Loading formal study...";
+            }
+            studyManager.FinishTraining();
+        }
+    }
+
+    private void PollControllerInput()
+    {
+        if (!leftHandDevice.isValid)
+        {
+            leftHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
+        }
+        if (!rightHandDevice.isValid)
+        {
+            rightHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        }
+
+        bool leftPrimary = ReadButton(leftHandDevice, UnityEngine.XR.CommonUsages.primaryButton);
+        bool leftSecondary = ReadButton(leftHandDevice, UnityEngine.XR.CommonUsages.secondaryButton);
+        bool rightPrimary = ReadButton(rightHandDevice, UnityEngine.XR.CommonUsages.primaryButton);
+        bool rightSecondary = ReadButton(rightHandDevice, UnityEngine.XR.CommonUsages.secondaryButton);
+        bool anyTrigger = ReadButton(leftHandDevice, UnityEngine.XR.CommonUsages.triggerButton) ||
+                          ReadButton(rightHandDevice, UnityEngine.XR.CommonUsages.triggerButton);
+
+        bool chooseLeft = (leftPrimary && !previousLeftPrimary) ||
+                          (leftSecondary && !previousLeftSecondary);
+        bool chooseRight = (rightPrimary && !previousRightPrimary) ||
+                           (rightSecondary && !previousRightSecondary);
+
+#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            chooseLeft |= keyboard.xKey.wasPressedThisFrame || keyboard.yKey.wasPressedThisFrame;
+            chooseRight |= keyboard.aKey.wasPressedThisFrame || keyboard.bKey.wasPressedThisFrame;
+            anyTrigger |= keyboard.spaceKey.isPressed || keyboard.enterKey.isPressed ||
+                          keyboard.spaceKey.wasPressedThisFrame || keyboard.enterKey.wasPressedThisFrame;
+        }
+#endif
+
+        if (!submitInputArmed)
+        {
+            submitInputArmed = !anyTrigger;
+        }
+        bool triggerPressed = submitInputArmed && anyTrigger && !previousAnyTrigger;
+
+        if (studyManager.currentPhase == StudyManager.StudyPhase.Formal ||
+            studyManager.currentPhase == StudyManager.StudyPhase.Redo)
+        {
+            if (chooseLeft) OnLeftClicked();
+            if (chooseRight) OnRightClicked();
+            if (triggerPressed) OnSubmitClicked();
+        }
+        else if (trainingUiState == TrainingUiState.ReadyForFormal)
+        {
+            if (chooseLeft) trainingReadyChoice = 1;
+            if (chooseRight) trainingReadyChoice = 2;
+            if (chooseLeft || chooseRight)
+            {
+                if (trainingReadyMessageText != null) trainingReadyMessageText.text = "";
+                UpdateTrainingReadyIndicators();
+            }
+            if (triggerPressed) ConfirmTrainingReadyChoice();
+        }
+        else if (trainingUiState == TrainingUiState.Answering)
+        {
+            if (chooseLeft) OnLeftClicked();
+            if (chooseRight) OnRightClicked();
+            if (triggerPressed) OnSubmitClicked();
+        }
+        else if (trainingUiState == TrainingUiState.Feedback && triggerPressed)
+        {
+            if (studyManager.IsLastTrainingTrial)
+            {
+                ShowTrainingReadyPage();
+            }
+            else
+            {
+                studyManager.NextTrial();
+            }
+        }
+
+        previousLeftPrimary = leftPrimary;
+        previousLeftSecondary = leftSecondary;
+        previousRightPrimary = rightPrimary;
+        previousRightSecondary = rightSecondary;
+        previousAnyTrigger = anyTrigger;
+    }
+
+    private static bool ReadButton(UnityEngine.XR.InputDevice device, InputFeatureUsage<bool> usage)
+    {
+        return device.isValid && device.TryGetFeatureValue(usage, out bool pressed) && pressed;
+    }
+
+#if UNITY_EDITOR
+    public void ShowTrainingReadyPageForPreview()
+    {
+        ShowTrainingReadyPage();
+    }
+#endif
 
     private void ApplyResultColor(Button button, int answerId, int correctId)
     {

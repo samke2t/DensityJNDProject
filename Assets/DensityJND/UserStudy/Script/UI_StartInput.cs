@@ -2,6 +2,10 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using UnityEngine.XR;
+#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+using UnityEngine.InputSystem;
+#endif
 
 public class UI_StartInput : MonoBehaviour
 {
@@ -16,6 +20,15 @@ public class UI_StartInput : MonoBehaviour
     }
 
     private StartAction lastStartAction = StartAction.Study;
+    private int pendingParticipantID;
+    private int pendingBlockIndex;
+    private int pendingTrialIndex;
+    private bool pendingFormalStart;
+    private bool hasPendingStart;
+    private UnityEngine.XR.InputDevice leftHandDevice;
+    private UnityEngine.XR.InputDevice rightHandDevice;
+    private bool previousAnyTrigger;
+    private bool confirmationTriggerArmed;
 
     #region =============== Inspector Configuration ===============
 
@@ -44,6 +57,10 @@ public class UI_StartInput : MonoBehaviour
     [SerializeField] private Button developerResumeStudyButton;
     [SerializeField] private Button developerRepairTrialButton;
 
+    [Header("Ready Confirmation")]
+    [SerializeField] private GameObject readyConfirmationView;
+    [SerializeField] private Button readyConfirmationButton;
+
     private TMP_InputField activeNumericInput;
 
     public bool LastRequestWasFormal { get; private set; }
@@ -64,16 +81,21 @@ public class UI_StartInput : MonoBehaviour
             uiController = transform.root.GetComponentInChildren<StudyUIController>(true);
         }
 
-        // Training configuration files are not present yet, so make Formal the
-        // safe default every time the start page is opened in Play mode.
-        trainingToggle?.SetIsOnWithoutNotify(false);
-        formalToggle?.SetIsOnWithoutNotify(true);
+        // Start on Training by default while still allowing the researcher to
+        // explicitly switch to Formal before beginning the study.
+        formalToggle?.SetIsOnWithoutNotify(false);
+        trainingToggle?.SetIsOnWithoutNotify(true);
 
         ConfigureNumericInput(participantIDInput, SelectParticipantInput);
         ConfigureNumericInput(developerParticipantIDInput, SelectDeveloperParticipantInput);
         ConfigureNumericInput(developerBlockIDInput, SelectDeveloperBlockInput);
         ConfigureNumericInput(developerTrialIDInput, SelectDeveloperTrialInput);
         activeNumericInput = participantIDInput;
+
+        if (readyConfirmationView != null)
+        {
+            readyConfirmationView.SetActive(false);
+        }
 
         ShowMessage("");
     }
@@ -84,6 +106,17 @@ public class UI_StartInput : MonoBehaviour
         RemoveInputListener(developerParticipantIDInput, SelectDeveloperParticipantInput);
         RemoveInputListener(developerBlockIDInput, SelectDeveloperBlockInput);
         RemoveInputListener(developerTrialIDInput, SelectDeveloperTrialInput);
+    }
+
+    private void OnEnable()
+    {
+        confirmationTriggerArmed = false;
+        previousAnyTrigger = false;
+    }
+
+    private void Update()
+    {
+        PollReadyConfirmationTrigger();
     }
 
     #endregion ====================================================
@@ -110,19 +143,7 @@ public class UI_StartInput : MonoBehaviour
         ShowMessage("");
         lastStartAction = StartAction.Study;
         LastRequestWasFormal = formalToggle != null && formalToggle.isOn;
-        Debug.Log($"[DensityJND] Start Study requested for participant {participantID}.");
-        uiController?.BeginLoading();
-
-        // The main Start button honors the selected phase. Formal starts from
-        // Block 1 / Trial 1 and never touches the absent Training files.
-        if (formalToggle != null && formalToggle.isOn)
-        {
-            studyManager.StartTrial(participantID, 0, 0, StudyManager.StudyPhase.Formal);
-        }
-        else
-        {
-            studyManager.StartStudy(participantID);
-        }
+        QueueStartConfirmation(participantID, 0, 0, LastRequestWasFormal);
     }
 
     public void OnDeveloperResumeStudyClicked()
@@ -144,9 +165,7 @@ public class UI_StartInput : MonoBehaviour
         ShowDeveloperStatus("");
         lastStartAction = StartAction.DeveloperResume;
         LastRequestWasFormal = true;
-        Debug.Log($"[DensityJND] Resume requested for participant {participantID}.");
-        uiController?.BeginLoading();
-        studyManager.ResumeStudy(participantID);
+        QueueStartConfirmation(participantID, 0, 0, true);
     }
 
     public void OnDeveloperRepairTrialClicked()
@@ -182,11 +201,68 @@ public class UI_StartInput : MonoBehaviour
         ShowDeveloperStatus("");
         lastStartAction = StartAction.DeveloperRepair;
         LastRequestWasFormal = true;
-        Debug.Log(
-            $"[DensityJND] Specific trial repair requested: participant {participantID}, " +
-            $"block {blockID}, trial {trialID}.");
+        QueueStartConfirmation(participantID, blockID - 1, trialID - 1, true);
+    }
+
+    public void OnReadyToBeginClicked()
+    {
+        if (!hasPendingStart || studyManager == null)
+        {
+            return;
+        }
+
+        hasPendingStart = false;
+        if (readyConfirmationView != null)
+        {
+            readyConfirmationView.SetActive(false);
+        }
+
         uiController?.BeginLoading();
-        studyManager.RepairSpecificTrial(participantID, blockID - 1, trialID - 1);
+
+        if (lastStartAction == StartAction.DeveloperResume)
+        {
+            Debug.Log($"[DensityJND] Resume requested for participant {pendingParticipantID}.");
+            studyManager.ResumeStudy(pendingParticipantID);
+        }
+        else if (lastStartAction == StartAction.DeveloperRepair)
+        {
+            Debug.Log(
+                $"[DensityJND] Formal start from specific trial requested: participant {pendingParticipantID}, " +
+                $"block {pendingBlockIndex + 1}, trial {pendingTrialIndex + 1}.");
+            studyManager.RepairSpecificTrial(pendingParticipantID, pendingBlockIndex, pendingTrialIndex);
+        }
+        else if (pendingFormalStart)
+        {
+            Debug.Log($"[DensityJND] Formal study requested for participant {pendingParticipantID}.");
+            studyManager.StartTrial(pendingParticipantID, 0, 0, StudyManager.StudyPhase.Formal);
+        }
+        else
+        {
+            Debug.Log($"[DensityJND] Training study requested for participant {pendingParticipantID}.");
+            studyManager.StartStudy(pendingParticipantID);
+        }
+    }
+
+    private void QueueStartConfirmation(int participantID, int blockIndex, int trialIndex, bool formalStart)
+    {
+        pendingParticipantID = participantID;
+        pendingBlockIndex = blockIndex;
+        pendingTrialIndex = trialIndex;
+        pendingFormalStart = formalStart;
+        hasPendingStart = true;
+        // If the preceding UI button was selected with a controller ray, that same held
+        // trigger must not immediately accept the confirmation page as well.
+        confirmationTriggerArmed = false;
+
+        if (readyConfirmationView != null)
+        {
+            readyConfirmationView.SetActive(true);
+        }
+        else
+        {
+            // Preserve a usable start flow if an older scene has not been rebuilt yet.
+            OnReadyToBeginClicked();
+        }
     }
 
     public void RetryLastAction()
@@ -203,6 +279,56 @@ public class UI_StartInput : MonoBehaviour
         {
             OnStartStudyClicked();
         }
+    }
+
+    private void PollReadyConfirmationTrigger()
+    {
+        if (!leftHandDevice.isValid)
+        {
+            leftHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
+        }
+        if (!rightHandDevice.isValid)
+        {
+            rightHandDevice = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        }
+
+        bool anyTrigger = ReadButton(leftHandDevice, UnityEngine.XR.CommonUsages.triggerButton) ||
+                          ReadButton(rightHandDevice, UnityEngine.XR.CommonUsages.triggerButton);
+#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            anyTrigger |= keyboard.spaceKey.isPressed || keyboard.enterKey.isPressed;
+        }
+#endif
+
+        bool canConfirm = hasPendingStart && readyConfirmationView != null &&
+                          readyConfirmationView.activeInHierarchy &&
+                          (readyConfirmationButton == null || readyConfirmationButton.interactable);
+        if (!canConfirm)
+        {
+            confirmationTriggerArmed = false;
+            previousAnyTrigger = anyTrigger;
+            return;
+        }
+
+        if (!confirmationTriggerArmed)
+        {
+            confirmationTriggerArmed = !anyTrigger;
+        }
+
+        bool triggerPressed = confirmationTriggerArmed && anyTrigger && !previousAnyTrigger;
+        previousAnyTrigger = anyTrigger;
+        if (triggerPressed)
+        {
+            confirmationTriggerArmed = false;
+            OnReadyToBeginClicked();
+        }
+    }
+
+    private static bool ReadButton(UnityEngine.XR.InputDevice device, InputFeatureUsage<bool> usage)
+    {
+        return device.isValid && device.TryGetFeatureValue(usage, out bool pressed) && pressed;
     }
 
     /// <summary>
@@ -266,6 +392,7 @@ public class UI_StartInput : MonoBehaviour
         if (developerTrialIDInput != null) developerTrialIDInput.interactable = interactable;
         if (developerResumeStudyButton != null) developerResumeStudyButton.interactable = interactable;
         if (developerRepairTrialButton != null) developerRepairTrialButton.interactable = interactable;
+        if (readyConfirmationButton != null) readyConfirmationButton.interactable = interactable;
     }
 
     public void ShowMessage(string message)

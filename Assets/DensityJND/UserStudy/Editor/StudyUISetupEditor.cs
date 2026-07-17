@@ -14,11 +14,9 @@ using UnityEngine.UI;
 public static class StudyUISetupEditor
 {
     private const string SceneName = "DensityJND_Equal";
-    private const string MarkerName = "GeneratedCompleteUI_v53";
+    private const string MarkerName = "GeneratedCompleteUI_v55";
     private const float StartViewScale = 0.78f;
     private const float EndViewScale = 0.78f;
-    private const float AnswerHandScale = 0.00032f;
-    private const float AnswerHandForwardOffset = 0.30f;
     private const string RoundedSpritePath =
         "Assets/Samples/XR Interaction Toolkit/2.5.4/Starter Assets/DemoSceneAssets/Sprites/Round Radius 4.png";
     // Horizon-inspired semantic palette: neutral surfaces, soft text and one restrained action blue.
@@ -68,7 +66,9 @@ public static class StudyUISetupEditor
         else
         {
             bool changed = ConfigureXRIfAvailable();
-            changed |= ConfigureAnswerHandUIIfAvailable();
+            changed |= ConfigureAnswerUIUnderStudyCanvas();
+            changed |= EnsureFormalHud();
+            changed |= EnsureTrainingHud();
             changed |= EnsureNextBlockUI();
             if (changed)
             {
@@ -206,7 +206,7 @@ public static class StudyUISetupEditor
 
         EnsureEventSystem();
         ConfigureXRIfAvailable();
-        ConfigureAnswerHandUIIfAvailable();
+        ConfigureAnswerUIUnderStudyCanvas();
 
         startView.SetActive(true);
         answerView.SetActive(false);
@@ -270,9 +270,35 @@ public static class StudyUISetupEditor
         SetRect(developerTab.GetComponent<RectTransform>(), new Vector2(480, 266), new Vector2(64, 64));
         UnityEventTools.AddPersistentListener(developerTab.onClick, controller.ShowDeveloperStartPage);
 
+        ReadyConfirmationWidgets readyConfirmation = BuildReadyConfirmation(panel.transform, inputHandler);
+
         developerPage.SetActive(false);
+        readyConfirmation.View.SetActive(false);
         return new StartViewWidgets(experimenterPage, developerPage, experimenterTab, developerTab,
-            experimenter, developer);
+            experimenter, developer, readyConfirmation);
+    }
+
+    private static ReadyConfirmationWidgets BuildReadyConfirmation(Transform parent, UI_StartInput inputHandler)
+    {
+        GameObject view = CreateUIObject("ReadyConfirmationView", parent);
+        Stretch(view.GetComponent<RectTransform>());
+
+        Image background = view.AddComponent<Image>();
+        background.color = new Color(Background.r, Background.g, Background.b, 1f);
+        background.raycastTarget = true;
+
+        GameObject card = CreateCard("ReadyConfirmationCard", view.transform, Card, new Vector2(820, 440));
+        CreateText("ReadyTitle", card.transform, "Ready to Begin?", 48, FontStyles.Bold,
+            new Vector2(0, 115), new Vector2(700, 70));
+        TMP_Text prompt = CreateText("ReadyPrompt", card.transform,
+            "Are you ready to enter the experiment?", 30, FontStyles.Normal,
+            new Vector2(0, 25), new Vector2(700, 80));
+        prompt.color = MutedText;
+
+        Button readyButton = CreateButton("ReadyToBeginButton", card.transform, "Begin Experiment", Primary);
+        SetRect(readyButton.GetComponent<RectTransform>(), new Vector2(0, -115), new Vector2(420, 76));
+        UnityEventTools.AddPersistentListener(readyButton.onClick, inputHandler.OnReadyToBeginClicked);
+        return new ReadyConfirmationWidgets(view, readyButton);
     }
 
     private static StartWidgets BuildStartPage(Transform page, UI_StartInput inputHandler, bool isDeveloper)
@@ -318,7 +344,7 @@ public static class StudyUISetupEditor
             SetRect(trial.GetComponent<RectTransform>(), new Vector2(-145, -185), new Vector2(200, 58));
 
             repairTrial = CreateButton(prefix + "RepairTrialButton", card.transform,
-                "Repair Specific Trial", Secondary);
+                "Start From Trial", Secondary);
             SetRect(repairTrial.GetComponent<RectTransform>(), new Vector2(-255, -255),
                 new Vector2(420, 62));
             UnityEventTools.AddPersistentListener(repairTrial.onClick,
@@ -336,9 +362,9 @@ public static class StudyUISetupEditor
             phaseGroup.allowSwitchOff = false;
             CreateText("PhaseSelectorLabel", card.transform, "Study mode", 20, FontStyles.Bold,
                 new Vector2(-255, -165), new Vector2(420, 30)).color = MutedText;
-            training = CreateToggle(prefix + "TrainingToggle", card.transform, "Training", phaseGroup, false);
+            training = CreateToggle(prefix + "TrainingToggle", card.transform, "Training", phaseGroup, true);
             SetRect(training.GetComponent<RectTransform>(), new Vector2(-365, -235), new Vector2(200, 68));
-            formal = CreateToggle(prefix + "FormalToggle", card.transform, "Formal", phaseGroup, true);
+            formal = CreateToggle(prefix + "FormalToggle", card.transform, "Formal", phaseGroup, false);
             SetRect(formal.GetComponent<RectTransform>(), new Vector2(-145, -235), new Vector2(200, 68));
 
             message = CreateText(prefix + "MessageText", card.transform, "", 25, FontStyles.Normal,
@@ -436,8 +462,126 @@ public static class StudyUISetupEditor
         again.interactable = false;
         formal.interactable = true;
 
+        FormalWidgets formalHud = BuildFormalHud(view);
+        TrainingWidgets trainingHud = BuildTrainingHud(view);
+        TrainingReadyWidgets trainingReadyHud = BuildTrainingReadyHud(view);
         return new AnswerWidgets(phase, block, trial, countdown, question, message, left, right, submit, next, again,
-            formal);
+            formal, panel, formalHud, trainingHud, trainingReadyHud);
+    }
+
+    private static FormalWidgets BuildFormalHud(Transform view)
+    {
+        GameObject hud = CreateUIObject("FormalHUD", view);
+        Stretch(hud.GetComponent<RectTransform>());
+
+        TMP_Text phase = CreateText("FormalPhaseText", hud.transform, "FORMAL", 28, FontStyles.Bold,
+            new Vector2(-475, 330), new Vector2(180, 52));
+        phase.alignment = TextAlignmentOptions.MidlineLeft;
+
+        TMP_Text block = CreateText("FormalBlockText", hud.transform, "BLOCK 1 / 4", 26, FontStyles.Bold,
+            new Vector2(-105, 330), new Vector2(240, 52));
+        TMP_Text trial = CreateText("FormalTrialText", hud.transform, "TRIAL 1 / 100", 26, FontStyles.Bold,
+            new Vector2(145, 330), new Vector2(260, 52));
+
+        CreateText("FormalQuestionText", hud.transform,
+            "Which of the following point clouds has a higher density?", 34, FontStyles.Bold,
+            new Vector2(0, 260), new Vector2(1040, 68));
+
+        TMP_Text countdown = CreateText("FormalCountdownText", hud.transform, "COUNTDOWN: 5", 32,
+            FontStyles.Bold, new Vector2(0, 195), new Vector2(360, 56));
+        countdown.color = Error;
+
+        // Keep the choice feedback outside the two stimulus centres (approximately +/-10 degrees)
+        // so the HUD never covers the point clouds while the participant compares them.
+        Image left = CreateFormalIndicator("FormalLeftIndicator", hud.transform, "LEFT", new Vector2(-480, 80));
+        Image right = CreateFormalIndicator("FormalRightIndicator", hud.transform, "RIGHT", new Vector2(480, 80));
+
+        TMP_Text message = CreateText("FormalMessageText", hud.transform, "", 24, FontStyles.Normal,
+            new Vector2(0, 68), new Vector2(760, 46));
+        message.color = Error;
+
+        foreach (Graphic graphic in hud.GetComponentsInChildren<Graphic>(true))
+        {
+            graphic.raycastTarget = false;
+        }
+
+        hud.SetActive(false);
+        return new FormalWidgets(hud, block, trial, countdown, message, left, right);
+    }
+
+    private static Image CreateFormalIndicator(string name, Transform parent, string label, Vector2 position)
+    {
+        GameObject indicator = CreateCard(name, parent, Secondary, new Vector2(190, 62));
+        SetRect(indicator.GetComponent<RectTransform>(), position, new Vector2(190, 62));
+        TMP_Text text = CreateText("Label", indicator.transform, label, 27, FontStyles.Bold,
+            Vector2.zero, Vector2.zero);
+        Stretch(text.rectTransform);
+        return indicator.GetComponent<Image>();
+    }
+
+    private static TrainingWidgets BuildTrainingHud(Transform view)
+    {
+        GameObject hud = CreateUIObject("TrainingHUD", view);
+        Stretch(hud.GetComponent<RectTransform>());
+
+        TMP_Text phase = CreateText("TrainingPhaseText", hud.transform, "TRAINING", 28, FontStyles.Bold,
+            new Vector2(-475, 330), new Vector2(200, 52));
+        phase.alignment = TextAlignmentOptions.MidlineLeft;
+        TMP_Text block = CreateText("TrainingBlockText", hud.transform, "BLOCK 1 / 4", 26, FontStyles.Bold,
+            new Vector2(-105, 330), new Vector2(240, 52));
+        TMP_Text trial = CreateText("TrainingTrialText", hud.transform, "TRIAL 1 / 2", 26, FontStyles.Bold,
+            new Vector2(145, 330), new Vector2(260, 52));
+
+        CreateText("TrainingQuestionText", hud.transform,
+            "Which point cloud has a higher density?", 34, FontStyles.Bold,
+            new Vector2(0, 260), new Vector2(960, 68));
+
+        TMP_Text countdown = CreateText("TrainingCountdownText", hud.transform, "COUNTDOWN: 5", 32,
+            FontStyles.Bold, new Vector2(0, 195), new Vector2(360, 56));
+        countdown.color = Error;
+
+        Image left = CreateFormalIndicator("TrainingLeftIndicator", hud.transform, "LEFT", new Vector2(-480, 80));
+        Image right = CreateFormalIndicator("TrainingRightIndicator", hud.transform, "RIGHT", new Vector2(480, 80));
+
+        TMP_Text feedback = CreateText("TrainingFeedbackText", hud.transform, "", 27, FontStyles.Bold,
+            new Vector2(0, 68), new Vector2(420, 46));
+        TMP_Text message = CreateText("TrainingMessageText", hud.transform, "", 23, FontStyles.Normal,
+            new Vector2(0, 25), new Vector2(760, 42));
+        message.color = Error;
+
+        foreach (Graphic graphic in hud.GetComponentsInChildren<Graphic>(true)) graphic.raycastTarget = false;
+        hud.SetActive(false);
+        return new TrainingWidgets(hud, block, trial, countdown, feedback, message, left, right);
+    }
+
+    private static TrainingReadyWidgets BuildTrainingReadyHud(Transform view)
+    {
+        GameObject hud = CreateUIObject("TrainingReadyHUD", view);
+        Stretch(hud.GetComponent<RectTransform>());
+
+        CreateText("TrainingReadyTitle", hud.transform, "READY FOR THE FORMAL STUDY?", 40, FontStyles.Bold,
+            new Vector2(0, 225), new Vector2(980, 76));
+        Image no = CreateTrainingReadyOption("TrainingReadyNoIndicator", hud.transform,
+            "NO\nRestart Training", new Vector2(-215, 105));
+        Image yes = CreateTrainingReadyOption("TrainingReadyYesIndicator", hud.transform,
+            "YES\nStart Formal", new Vector2(215, 105));
+        TMP_Text message = CreateText("TrainingReadyMessageText", hud.transform, "", 24, FontStyles.Normal,
+            new Vector2(0, 5), new Vector2(760, 46));
+        message.color = Error;
+
+        foreach (Graphic graphic in hud.GetComponentsInChildren<Graphic>(true)) graphic.raycastTarget = false;
+        hud.SetActive(false);
+        return new TrainingReadyWidgets(hud, no, yes, message);
+    }
+
+    private static Image CreateTrainingReadyOption(string name, Transform parent, string label, Vector2 position)
+    {
+        GameObject option = CreateCard(name, parent, Secondary, new Vector2(340, 120));
+        SetRect(option.GetComponent<RectTransform>(), position, new Vector2(340, 120));
+        TMP_Text text = CreateText("Label", option.transform, label, 28, FontStyles.Bold,
+            Vector2.zero, Vector2.zero);
+        Stretch(text.rectTransform);
+        return option.GetComponent<Image>();
     }
 
     private static EndWidgets BuildEndView(Transform view, StudyUIController controller)
@@ -461,7 +605,7 @@ public static class StudyUISetupEditor
         summary.color = MutedText;
         CreateText("EndInstruction", card.transform,
             "Please keep the headset on and wait for the researcher.", 25, FontStyles.Normal,
-            new Vector2(0, -55), new Vector2(800, 64)).color = MutedText;
+            new Vector2(0, -15), new Vector2(800, 64)).color = MutedText;
         Button nextBlock = CreateButton("NextBlockButton", card.transform, "Next Block", Primary);
         SetRect(nextBlock.GetComponent<RectTransform>(), new Vector2(0, -155), new Vector2(360, 82));
         nextBlock.GetComponentInChildren<TMP_Text>().fontSize = 30;
@@ -518,6 +662,8 @@ public static class StudyUISetupEditor
         SetObject(serialized, "developerMessageText", widgets.Developer.Message);
         SetObject(serialized, "developerResumeStudyButton", widgets.Developer.StartStudy);
         SetObject(serialized, "developerRepairTrialButton", widgets.Developer.RepairTrial);
+        SetObject(serialized, "readyConfirmationView", widgets.ReadyConfirmation.View);
+        SetObject(serialized, "readyConfirmationButton", widgets.ReadyConfirmation.Button);
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
@@ -539,6 +685,26 @@ public static class StudyUISetupEditor
         SetObject(serialized, "nextButton", widgets.Next);
         SetObject(serialized, "trainingAgainButton", widgets.Again);
         SetObject(serialized, "startFormalButton", widgets.Formal);
+        SetObject(serialized, "trainingPanel", widgets.TrainingPanel);
+        SetObject(serialized, "formalHud", widgets.FormalHud.Hud);
+        SetObject(serialized, "formalBlockText", widgets.FormalHud.Block);
+        SetObject(serialized, "formalTrialText", widgets.FormalHud.Trial);
+        SetObject(serialized, "formalCountdownText", widgets.FormalHud.Countdown);
+        SetObject(serialized, "formalMessageText", widgets.FormalHud.Message);
+        SetObject(serialized, "formalLeftIndicator", widgets.FormalHud.Left);
+        SetObject(serialized, "formalRightIndicator", widgets.FormalHud.Right);
+        SetObject(serialized, "trainingHud", widgets.TrainingHud.Hud);
+        SetObject(serialized, "trainingBlockText", widgets.TrainingHud.Block);
+        SetObject(serialized, "trainingTrialText", widgets.TrainingHud.Trial);
+        SetObject(serialized, "trainingCountdownText", widgets.TrainingHud.Countdown);
+        SetObject(serialized, "trainingFeedbackText", widgets.TrainingHud.Feedback);
+        SetObject(serialized, "trainingMessageText", widgets.TrainingHud.Message);
+        SetObject(serialized, "trainingLeftIndicator", widgets.TrainingHud.Left);
+        SetObject(serialized, "trainingRightIndicator", widgets.TrainingHud.Right);
+        SetObject(serialized, "trainingReadyHud", widgets.TrainingReadyHud.Hud);
+        SetObject(serialized, "trainingReadyNoIndicator", widgets.TrainingReadyHud.No);
+        SetObject(serialized, "trainingReadyYesIndicator", widgets.TrainingReadyHud.Yes);
+        SetObject(serialized, "trainingReadyMessageText", widgets.TrainingReadyHud.Message);
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
@@ -904,16 +1070,14 @@ public static class StudyUISetupEditor
     }
 
     /// <summary>
-    /// Keeps the live answer view on its own world-space canvas under the tracked left controller.
-    /// The other study views remain on StudyCanvas in front of the participant.
+    /// Keeps the live answer view with the other study views under StudyCanvas.
+    /// Removes the standalone canvas components that were needed by the old hand-mounted layout.
     /// </summary>
-    public static bool ConfigureAnswerHandUIIfAvailable()
+    public static bool ConfigureAnswerUIUnderStudyCanvas()
     {
-        GameObject xrSetup = FindSceneObject("Quest XR Interaction Setup");
+        GameObject studyCanvas = FindSceneObject("StudyCanvas");
         GameObject answerView = FindSceneObject("AnswerUIView");
-        Type trackedRaycasterType =
-            FindType("UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster");
-        if (xrSetup == null || answerView == null || trackedRaycasterType == null)
+        if (studyCanvas == null || answerView == null)
         {
             return false;
         }
@@ -931,124 +1095,50 @@ public static class StudyUISetupEditor
             changed = true;
         }
 
-        Transform leftController = xrSetup.GetComponentsInChildren<Transform>(true)
-            .FirstOrDefault(item => item.name == "Left Controller");
-        Transform rightController = xrSetup.GetComponentsInChildren<Transform>(true)
-            .FirstOrDefault(item => item.name == "Right Controller");
-        Camera xrCamera = xrSetup.GetComponentInChildren<Camera>(true);
-        if (leftController == null || rightController == null || xrCamera == null)
+        RectTransform rect = answerView.GetComponent<RectTransform>();
+        if (rect == null)
         {
             return changed;
         }
 
-        // The answer panel sits close to the left controller. Keep the right-hand ray's UI path
-        // active even if its physics cast also touches a nearby controller/interactable.
-        Type xrRayInteractorType = FindType("UnityEngine.XR.Interaction.Toolkit.XRRayInteractor");
-        Component rightRay = xrRayInteractorType == null
-            ? null
-            : rightController.GetComponentsInChildren(xrRayInteractorType, true)
-                .FirstOrDefault(item => item.gameObject.name == "Ray Interactor");
-        if (rightRay != null)
+        if (rect.parent != studyCanvas.transform)
         {
-            if (!rightRay.gameObject.activeSelf)
-            {
-                rightRay.gameObject.SetActive(true);
-                changed = true;
-            }
-            if (rightRay is Behaviour rightRayBehaviour && !rightRayBehaviour.enabled)
-            {
-                rightRayBehaviour.enabled = true;
-                changed = true;
-            }
-
-            SerializedObject rightRayProperties = new SerializedObject(rightRay);
-            SerializedProperty enableUI = rightRayProperties.FindProperty("m_EnableUIInteraction");
-            SerializedProperty blockUI = rightRayProperties.FindProperty("m_BlockUIOnInteractableSelection");
-            if (enableUI != null && !enableUI.boolValue)
-            {
-                enableUI.boolValue = true;
-                changed = true;
-            }
-            if (blockUI != null && blockUI.boolValue)
-            {
-                blockUI.boolValue = false;
-                changed = true;
-            }
-            rightRayProperties.ApplyModifiedPropertiesWithoutUndo();
+            Undo.SetTransformParent(rect, studyCanvas.transform, "Move Answer UI under StudyCanvas");
+            changed = true;
         }
 
-        RectTransform rect = answerView.GetComponent<RectTransform>();
-        bool newlyAttached = rect.parent != leftController;
-        if (newlyAttached)
+        if (rect.anchorMin != Vector2.zero || rect.anchorMax != Vector2.one ||
+            rect.pivot != new Vector2(0.5f, 0.5f) || rect.anchoredPosition3D != Vector3.zero ||
+            rect.sizeDelta != Vector2.zero || rect.localRotation != Quaternion.identity ||
+            rect.localScale != Vector3.one)
         {
-            Undo.SetTransformParent(rect, leftController, "Attach Answer UI to left controller");
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            Undo.RecordObject(rect, "Reset Answer UI layout under StudyCanvas");
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(1200f, 800f);
+            rect.anchoredPosition3D = Vector3.zero;
+            rect.sizeDelta = Vector2.zero;
             rect.localRotation = Quaternion.identity;
+            rect.localScale = Vector3.one;
             changed = true;
         }
 
-        Vector3 targetPosition = new Vector3(0f, 0.10f, AnswerHandForwardOffset);
-        if ((rect.anchoredPosition3D - targetPosition).sqrMagnitude > Mathf.Epsilon)
+        Type trackedRaycasterType =
+            FindType("UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster");
+        Component[] rootComponents = answerView.GetComponents<Component>();
+        foreach (Component component in rootComponents.Reverse())
         {
-            Undo.RecordObject(rect, "Move Answer UI away from left controller");
-            rect.anchoredPosition3D = targetPosition;
-            changed = true;
-        }
+            bool isStandaloneCanvasComponent = component is Canvas ||
+                                               component is CanvasScaler ||
+                                               component is GraphicRaycaster ||
+                                               (trackedRaycasterType != null &&
+                                                trackedRaycasterType.IsInstanceOfType(component));
+            if (!isStandaloneCanvasComponent)
+            {
+                continue;
+            }
 
-        Vector3 targetScale = Vector3.one * AnswerHandScale;
-        if ((rect.localScale - targetScale).sqrMagnitude > Mathf.Epsilon)
-        {
-            Undo.RecordObject(rect, "Resize Answer UI");
-            rect.localScale = targetScale;
-            changed = true;
-        }
-
-        Canvas answerCanvas = answerView.GetComponent<Canvas>();
-        if (answerCanvas == null)
-        {
-            answerCanvas = Undo.AddComponent<Canvas>(answerView);
-            changed = true;
-        }
-        answerCanvas.renderMode = RenderMode.WorldSpace;
-        if (answerCanvas.worldCamera != xrCamera)
-        {
-            answerCanvas.worldCamera = xrCamera;
-            changed = true;
-        }
-        answerCanvas.overrideSorting = true;
-        answerCanvas.sortingOrder = 1;
-
-        CanvasScaler scaler = answerView.GetComponent<CanvasScaler>();
-        if (scaler == null)
-        {
-            scaler = Undo.AddComponent<CanvasScaler>(answerView);
-            changed = true;
-        }
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
-        scaler.dynamicPixelsPerUnit = 16f;
-
-        GraphicRaycaster standard = answerView.GetComponent<GraphicRaycaster>();
-        if (standard == null)
-        {
-            standard = Undo.AddComponent<GraphicRaycaster>(answerView);
-            changed = true;
-        }
-        if (standard.ignoreReversedGraphics)
-        {
-            standard.ignoreReversedGraphics = false;
-            changed = true;
-        }
-        if (standard.enabled)
-        {
-            standard.enabled = false;
-            changed = true;
-        }
-        if (answerView.GetComponent(trackedRaycasterType) == null)
-        {
-            Undo.AddComponent(answerView, trackedRaycasterType);
+            Undo.DestroyObjectImmediate(component);
             changed = true;
         }
 
@@ -1058,6 +1148,185 @@ public static class StudyUISetupEditor
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         }
         return changed;
+    }
+
+    [MenuItem("Tools/Density JND/Ensure Formal HUD")]
+    public static void EnsureFormalHudFromMenu()
+    {
+        if (EnsureFormalHud())
+        {
+            EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
+        }
+    }
+
+    public static bool EnsureFormalHud()
+    {
+        GameObject answerView = FindSceneObject("AnswerUIView");
+        if (answerView == null)
+        {
+            return false;
+        }
+
+        UI_AnswerInput input = UnityEngine.Object.FindObjectOfType<UI_AnswerInput>(true);
+        GameObject trainingPanel = answerView.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "AnswerPanel")?.gameObject;
+        if (input == null || trainingPanel == null)
+        {
+            return false;
+        }
+
+        bool changed = false;
+        Transform existingHud = answerView.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "FormalHUD");
+        FormalWidgets widgets;
+        if (existingHud == null)
+        {
+            widgets = BuildFormalHud(answerView.transform);
+            changed = true;
+        }
+        else
+        {
+            TMP_Text block = existingHud.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(item => item.name == "FormalBlockText");
+            TMP_Text trial = existingHud.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(item => item.name == "FormalTrialText");
+            TMP_Text countdown = existingHud.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(item => item.name == "FormalCountdownText");
+            TMP_Text message = existingHud.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(item => item.name == "FormalMessageText");
+            Image left = existingHud.GetComponentsInChildren<Image>(true)
+                .FirstOrDefault(item => item.name == "FormalLeftIndicator");
+            Image right = existingHud.GetComponentsInChildren<Image>(true)
+                .FirstOrDefault(item => item.name == "FormalRightIndicator");
+
+            if (block == null || trial == null || countdown == null || message == null || left == null || right == null)
+            {
+                Undo.DestroyObjectImmediate(existingHud.gameObject);
+                widgets = BuildFormalHud(answerView.transform);
+                changed = true;
+            }
+            else
+            {
+                widgets = new FormalWidgets(existingHud.gameObject, block, trial, countdown, message, left, right);
+            }
+        }
+
+        SerializedObject serialized = new SerializedObject(input);
+        changed |= SetObjectIfDifferent(serialized, "trainingPanel", trainingPanel);
+        changed |= SetObjectIfDifferent(serialized, "formalHud", widgets.Hud);
+        changed |= SetObjectIfDifferent(serialized, "formalBlockText", widgets.Block);
+        changed |= SetObjectIfDifferent(serialized, "formalTrialText", widgets.Trial);
+        changed |= SetObjectIfDifferent(serialized, "formalCountdownText", widgets.Countdown);
+        changed |= SetObjectIfDifferent(serialized, "formalMessageText", widgets.Message);
+        changed |= SetObjectIfDifferent(serialized, "formalLeftIndicator", widgets.Left);
+        changed |= SetObjectIfDifferent(serialized, "formalRightIndicator", widgets.Right);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(input);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        }
+        return changed;
+    }
+
+    [MenuItem("Tools/Density JND/Ensure Training HUD")]
+    public static void EnsureTrainingHudFromMenu()
+    {
+        if (EnsureTrainingHud())
+        {
+            EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
+        }
+    }
+
+    public static bool EnsureTrainingHud()
+    {
+        GameObject answerView = FindSceneObject("AnswerUIView");
+        if (answerView == null) return false;
+
+        UI_AnswerInput input = UnityEngine.Object.FindObjectOfType<UI_AnswerInput>(true);
+        if (input == null) return false;
+
+        bool changed = false;
+        Transform trainingRoot = answerView.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "TrainingHUD");
+        TrainingWidgets training;
+        if (!TryReadTrainingWidgets(trainingRoot, out training))
+        {
+            if (trainingRoot != null) Undo.DestroyObjectImmediate(trainingRoot.gameObject);
+            training = BuildTrainingHud(answerView.transform);
+            changed = true;
+        }
+
+        Transform readyRoot = answerView.GetComponentsInChildren<Transform>(true)
+            .FirstOrDefault(item => item.name == "TrainingReadyHUD");
+        TrainingReadyWidgets ready;
+        if (!TryReadTrainingReadyWidgets(readyRoot, out ready))
+        {
+            if (readyRoot != null) Undo.DestroyObjectImmediate(readyRoot.gameObject);
+            ready = BuildTrainingReadyHud(answerView.transform);
+            changed = true;
+        }
+
+        SerializedObject serialized = new SerializedObject(input);
+        changed |= SetObjectIfDifferent(serialized, "trainingHud", training.Hud);
+        changed |= SetObjectIfDifferent(serialized, "trainingBlockText", training.Block);
+        changed |= SetObjectIfDifferent(serialized, "trainingTrialText", training.Trial);
+        changed |= SetObjectIfDifferent(serialized, "trainingCountdownText", training.Countdown);
+        changed |= SetObjectIfDifferent(serialized, "trainingFeedbackText", training.Feedback);
+        changed |= SetObjectIfDifferent(serialized, "trainingMessageText", training.Message);
+        changed |= SetObjectIfDifferent(serialized, "trainingLeftIndicator", training.Left);
+        changed |= SetObjectIfDifferent(serialized, "trainingRightIndicator", training.Right);
+        changed |= SetObjectIfDifferent(serialized, "trainingReadyHud", ready.Hud);
+        changed |= SetObjectIfDifferent(serialized, "trainingReadyNoIndicator", ready.No);
+        changed |= SetObjectIfDifferent(serialized, "trainingReadyYesIndicator", ready.Yes);
+        changed |= SetObjectIfDifferent(serialized, "trainingReadyMessageText", ready.Message);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(input);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        }
+        return changed;
+    }
+
+    private static bool TryReadTrainingWidgets(Transform root, out TrainingWidgets widgets)
+    {
+        widgets = default;
+        if (root == null) return false;
+
+        TMP_Text block = FindChild<TMP_Text>(root, "TrainingBlockText");
+        TMP_Text trial = FindChild<TMP_Text>(root, "TrainingTrialText");
+        TMP_Text countdown = FindChild<TMP_Text>(root, "TrainingCountdownText");
+        TMP_Text feedback = FindChild<TMP_Text>(root, "TrainingFeedbackText");
+        TMP_Text message = FindChild<TMP_Text>(root, "TrainingMessageText");
+        Image left = FindChild<Image>(root, "TrainingLeftIndicator");
+        Image right = FindChild<Image>(root, "TrainingRightIndicator");
+        if (block == null || trial == null || countdown == null || feedback == null || message == null ||
+            left == null || right == null) return false;
+
+        widgets = new TrainingWidgets(root.gameObject, block, trial, countdown, feedback, message, left, right);
+        return true;
+    }
+
+    private static bool TryReadTrainingReadyWidgets(Transform root, out TrainingReadyWidgets widgets)
+    {
+        widgets = default;
+        if (root == null) return false;
+
+        Image no = FindChild<Image>(root, "TrainingReadyNoIndicator");
+        Image yes = FindChild<Image>(root, "TrainingReadyYesIndicator");
+        TMP_Text message = FindChild<TMP_Text>(root, "TrainingReadyMessageText");
+        if (no == null || yes == null || message == null) return false;
+
+        widgets = new TrainingReadyWidgets(root.gameObject, no, yes, message);
+        return true;
+    }
+
+    private static T FindChild<T>(Transform root, string name) where T : Component
+    {
+        return root.GetComponentsInChildren<T>(true).FirstOrDefault(item => item.name == name);
     }
 
     private static bool EnsureNextBlockUI()
@@ -1141,9 +1410,10 @@ public static class StudyUISetupEditor
         StudyManager manager = UnityEngine.Object.FindObjectOfType<StudyManager>(true);
         StudyUIController controller = UnityEngine.Object.FindObjectOfType<StudyUIController>(true);
         GameObject answerView = FindSceneObject("AnswerUIView");
-        bool answerAttachedToLeftController = answerView != null && answerView.GetComponent<Canvas>() != null &&
-                                              answerView.transform.parent != null &&
-                                              answerView.transform.parent.name == "Left Controller";
+        GameObject studyCanvas = FindSceneObject("StudyCanvas");
+        bool answerUnderStudyCanvas = answerView != null && studyCanvas != null &&
+                                      answerView.transform.parent == studyCanvas.transform &&
+                                      answerView.GetComponent<Canvas>() == null;
         GameObject xrSetup = FindSceneObject("Quest XR Interaction Setup");
         Transform rightController = xrSetup == null
             ? null
@@ -1174,12 +1444,12 @@ public static class StudyUISetupEditor
         }
 
         bool valid = string.IsNullOrEmpty(missing) && manager != null && controller != null &&
-                     missingManagerReferences == 0 && answerAttachedToLeftController && rightRaySupportsUI;
+                     missingManagerReferences == 0 && answerUnderStudyCanvas && rightRaySupportsUI;
         return valid
-            ? "PASS: all UI views, StudyManager references, the left-controller Answer UI, and right-hand UI selection are configured."
+            ? "PASS: all UI views, StudyManager references, StudyCanvas Answer UI, and right-hand UI selection are configured."
             : "FAIL: missing objects: " + (string.IsNullOrEmpty(missing) ? "none" : missing) +
               "; missing manager references: " + missingManagerReferences +
-              "; Answer UI attached to Left Controller: " + answerAttachedToLeftController +
+              "; Answer UI under StudyCanvas: " + answerUnderStudyCanvas +
               "; right-hand UI ray ready: " + rightRaySupportsUI + ".";
     }
 
@@ -1238,6 +1508,19 @@ public static class StudyUISetupEditor
         if (property != null) property.objectReferenceValue = value;
     }
 
+    private static bool SetObjectIfDifferent(SerializedObject serialized, string propertyName,
+        UnityEngine.Object value)
+    {
+        SerializedProperty property = serialized.FindProperty(propertyName);
+        if (property == null || property.objectReferenceValue == value)
+        {
+            return false;
+        }
+
+        property.objectReferenceValue = value;
+        return true;
+    }
+
     private static void Stretch(RectTransform rect)
     {
         rect.anchorMin = Vector2.zero;
@@ -1262,9 +1545,11 @@ public static class StudyUISetupEditor
         public readonly GameObject ExperimenterPage, DeveloperPage;
         public readonly Button ExperimenterTab, DeveloperTab;
         public readonly StartWidgets Experimenter, Developer;
+        public readonly ReadyConfirmationWidgets ReadyConfirmation;
 
         public StartViewWidgets(GameObject experimenterPage, GameObject developerPage,
-            Button experimenterTab, Button developerTab, StartWidgets experimenter, StartWidgets developer)
+            Button experimenterTab, Button developerTab, StartWidgets experimenter, StartWidgets developer,
+            ReadyConfirmationWidgets readyConfirmation)
         {
             ExperimenterPage = experimenterPage;
             DeveloperPage = developerPage;
@@ -1272,6 +1557,19 @@ public static class StudyUISetupEditor
             DeveloperTab = developerTab;
             Experimenter = experimenter;
             Developer = developer;
+            ReadyConfirmation = readyConfirmation;
+        }
+    }
+
+    private readonly struct ReadyConfirmationWidgets
+    {
+        public readonly GameObject View;
+        public readonly Button Button;
+
+        public ReadyConfirmationWidgets(GameObject view, Button button)
+        {
+            View = view;
+            Button = button;
         }
     }
 
@@ -1293,11 +1591,59 @@ public static class StudyUISetupEditor
     {
         public readonly TMP_Text Phase, Block, Trial, Countdown, Question, Message;
         public readonly Button Left, Right, Submit, Next, Again, Formal;
+        public readonly GameObject TrainingPanel;
+        public readonly FormalWidgets FormalHud;
+        public readonly TrainingWidgets TrainingHud;
+        public readonly TrainingReadyWidgets TrainingReadyHud;
         public AnswerWidgets(TMP_Text phase, TMP_Text block, TMP_Text trial, TMP_Text countdown, TMP_Text question,
-            TMP_Text message, Button left, Button right, Button submit, Button next, Button again, Button formal)
+            TMP_Text message, Button left, Button right, Button submit, Button next, Button again, Button formal,
+            GameObject trainingPanel, FormalWidgets formalHud, TrainingWidgets trainingHud,
+            TrainingReadyWidgets trainingReadyHud)
         {
             Phase = phase; Block = block; Trial = trial; Countdown = countdown; Question = question; Message = message;
             Left = left; Right = right; Submit = submit; Next = next; Again = again; Formal = formal;
+            TrainingPanel = trainingPanel; FormalHud = formalHud;
+            TrainingHud = trainingHud; TrainingReadyHud = trainingReadyHud;
+        }
+    }
+
+    private readonly struct FormalWidgets
+    {
+        public readonly GameObject Hud;
+        public readonly TMP_Text Block, Trial, Countdown, Message;
+        public readonly Image Left, Right;
+
+        public FormalWidgets(GameObject hud, TMP_Text block, TMP_Text trial, TMP_Text countdown, TMP_Text message,
+            Image left, Image right)
+        {
+            Hud = hud; Block = block; Trial = trial; Countdown = countdown; Message = message;
+            Left = left; Right = right;
+        }
+    }
+
+    private readonly struct TrainingWidgets
+    {
+        public readonly GameObject Hud;
+        public readonly TMP_Text Block, Trial, Countdown, Feedback, Message;
+        public readonly Image Left, Right;
+
+        public TrainingWidgets(GameObject hud, TMP_Text block, TMP_Text trial, TMP_Text countdown,
+            TMP_Text feedback, TMP_Text message, Image left, Image right)
+        {
+            Hud = hud; Block = block; Trial = trial; Countdown = countdown;
+            Feedback = feedback; Message = message; Left = left; Right = right;
+        }
+    }
+
+    private readonly struct TrainingReadyWidgets
+    {
+        public readonly GameObject Hud;
+        public readonly Image No, Yes;
+        public readonly TMP_Text Message;
+
+        public TrainingReadyWidgets(GameObject hud, Image no, Image yes, TMP_Text message)
+        {
+            Hud = hud; No = no; Yes = yes; Message = message;
         }
     }
 

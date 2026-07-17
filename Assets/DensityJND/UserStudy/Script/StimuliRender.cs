@@ -14,6 +14,8 @@ public class StimuliRender : MonoBehaviour
     private Mesh sphereMesh;
     private bool isRender = false;
 
+    public bool IsRendering => isRender;
+
     private readonly List<RenderBatch> renderBatches = new List<RenderBatch>();
 
     private sealed class RenderBatch

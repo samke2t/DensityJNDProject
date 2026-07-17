@@ -234,12 +234,12 @@ public static class QuestSetupEditor
             EditorUtility.SetDirty(manager);
         }
 
-        StudyUISetupEditor.ConfigureAnswerHandUIIfAvailable();
+        StudyUISetupEditor.ConfigureAnswerUIUnderStudyCanvas();
         GameObject answerView = FindSceneObject("AnswerUIView");
-        bool answerHandUIReady = answerView != null && answerView.GetComponent<Canvas>() != null &&
-                                 answerView.transform.parent != null &&
-                                 answerView.transform.parent.name == "Left Controller";
-        return existing != null && xrCamera != null && manager != null && canvas != null && answerHandUIReady;
+        bool answerCanvasUIReady = answerView != null && canvas != null &&
+                                   answerView.transform.parent == canvas.transform &&
+                                   answerView.GetComponent<Canvas>() == null;
+        return existing != null && xrCamera != null && manager != null && canvas != null && answerCanvasUIReady;
     }
 
     private static void ConfigureAndroidPlayer()

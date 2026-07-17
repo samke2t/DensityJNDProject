@@ -1,3 +1,9 @@
-ConditionID,DatasetName,SourceLabel,SamplingSeed,Distance,DensityRatio,CorrectAnswer
-1,Dataset1,1,1001,0,0.30,1
-2,Dataset1,5,1002,0,0.10,2
+SceneID,ConditionID,RepetitionID,DatasetName,Distance,DensityRatio,CorrectAnswer
+1,1,1,Stimuli1_-0.300_1,1.0,-0.300,1
+2,12,2,Stimuli112_+0.300_2,1.0,0.300,2
+3,1,5,Stimuli5_-0.300_2,1.414,-0.300,2
+4,12,3,Stimuli113_+0.300_1,1.414,0.300,1
+5,1,10,Stimuli10_-0.300_1,2.0,-0.300,1
+6,12,4,Stimuli114_+0.300_2,2.0,0.300,2
+7,1,9,Stimuli9_-0.300_2,2.828,-0.300,2
+8,12,10,Stimuli120_+0.300_1,2.828,0.300,1
