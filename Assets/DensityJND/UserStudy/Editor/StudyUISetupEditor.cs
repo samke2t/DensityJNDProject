@@ -539,7 +539,7 @@ public static class StudyUISetupEditor
             "Which point cloud has a higher density?", 34, FontStyles.Bold,
             new Vector2(0, 260), new Vector2(960, 68));
 
-        TMP_Text countdown = CreateText("TrainingCountdownText", hud.transform, "COUNTDOWN: 5", 32,
+        TMP_Text countdown = CreateText("TrainingCountdownText", hud.transform, "", 32,
             FontStyles.Bold, new Vector2(0, 195), new Vector2(360, 56));
         countdown.color = Error;
 

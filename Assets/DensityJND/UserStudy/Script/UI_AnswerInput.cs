@@ -235,6 +235,13 @@ public class UI_AnswerInput : MonoBehaviour
 
         CacheAnswerCopyReferences();
         ApplyAnswerCopy();
+
+        // Training is self-paced, so its countdown is intentionally absent.
+        if (trainingCountdownText != null)
+        {
+            trainingCountdownText.text = "";
+            trainingCountdownText.gameObject.SetActive(false);
+        }
     }
 
     private void OnEnable()
@@ -333,6 +340,14 @@ public class UI_AnswerInput : MonoBehaviour
             studyManager.currentPhase == StudyManager.StudyPhase.Redo)
         {
             PollControllerInput();
+        }
+
+        if (studyManager.currentPhase == StudyManager.StudyPhase.Training)
+        {
+            if (countdownText != null) countdownText.text = "";
+            if (formalCountdownText != null) formalCountdownText.text = "";
+            if (trainingCountdownText != null) trainingCountdownText.text = "";
+            return;
         }
 
         if (studyManager.trialStartTime < 0f)

@@ -544,11 +544,22 @@ public class StudyManager : MonoBehaviour
     // 加载每一个 trial 的内容
     public void SetupTrial(TrialInfo currTrial)
     {
+        StopStimulusTimer();
         RenderTrialAtCurrentHeadPose(currTrial);
 
         answerInput.RefreshTrialInformation(); // 同步这个Trial的信息
 
-        stimulusTimerCoroutine = StartCoroutine(HideStimulusAfterDelay());
+        // Training is self-paced: keep both point clouds visible until the
+        // participant advances or leaves training. Formal and redo trials keep
+        // the configured limited presentation time.
+        if (currentPhase == StudyPhase.Training)
+        {
+            trialStartTime = -1f;
+        }
+        else
+        {
+            stimulusTimerCoroutine = StartCoroutine(HideStimulusAfterDelay());
+        }
     }
 
     /// <summary>
