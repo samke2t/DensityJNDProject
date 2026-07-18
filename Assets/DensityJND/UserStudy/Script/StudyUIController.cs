@@ -4,8 +4,9 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR;
-#if ENABLE_INPUT_SYSTEM && UNITY_EDITOR
+#if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
+using UnityEngine.XR.Interaction.Toolkit.Inputs;
 #endif
 #if UNITY_EDITOR
 using UnityEngine.EventSystems;
@@ -81,6 +82,10 @@ public sealed class StudyUIController : MonoBehaviour
 
     private void Awake()
     {
+#if ENABLE_INPUT_SYSTEM
+        DisableXRThumbsticks();
+#endif
+
 #if UNITY_EDITOR
         ConfigureEditorMouseInput();
 #endif
@@ -99,6 +104,49 @@ public sealed class StudyUIController : MonoBehaviour
         Application.logMessageReceived += HandleLogMessage;
         ShowStart();
     }
+
+#if ENABLE_INPUT_SYSTEM
+    private static void DisableXRThumbsticks()
+    {
+        foreach (InputActionManager manager in FindObjectsOfType<InputActionManager>(true))
+        {
+            foreach (InputActionAsset actionAsset in manager.actionAssets)
+            {
+                if (actionAsset == null)
+                {
+                    continue;
+                }
+
+                bool wasEnabled = actionAsset.enabled;
+                if (wasEnabled)
+                {
+                    actionAsset.Disable();
+                }
+
+                foreach (InputActionMap actionMap in actionAsset.actionMaps)
+                {
+                    foreach (InputAction action in actionMap.actions)
+                    {
+                        for (int bindingIndex = 0; bindingIndex < action.bindings.Count; bindingIndex++)
+                        {
+                            string path = action.bindings[bindingIndex].path;
+                            if (!string.IsNullOrEmpty(path) &&
+                                path.IndexOf("Primary2DAxis", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                action.ApplyBindingOverride(bindingIndex, string.Empty);
+                            }
+                        }
+                    }
+                }
+
+                if (wasEnabled)
+                {
+                    actionAsset.Enable();
+                }
+            }
+        }
+    }
+#endif
 
 #if UNITY_EDITOR
     private void UseTemporaryAnswerPreviewInEditor()

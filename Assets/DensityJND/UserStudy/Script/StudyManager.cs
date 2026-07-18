@@ -106,7 +106,9 @@ public class StudyManager : MonoBehaviour
     public int BlockCount => blockCount;
     public int FormalTrialCount => trialCountPB;
     public int TrainingTrialCount => trainingCountPB;
-    public bool HasNextBlock => currentBlock + 1 < blockCount;
+    public bool HasNextBlock => currentPhase == StudyPhase.Redo
+        ? HasNextRecoveryBlock()
+        : currentBlock + 1 < blockCount;
     public bool HasPendingRecovery => redoList != null && redoList.Length > 0;
     public string CurrentPhaseLabel => currentRunMode == TrialRunMode.Resume
         ? "Resume"
@@ -713,16 +715,7 @@ public class StudyManager : MonoBehaviour
                 {
                     // Pause on the block summary. The researcher/participant explicitly
                     // starts the next block from the new Next Block button.
-                    if (uiController != null)
-                    {
-                        uiController.ShowBlockEnd(
-                            $"Block {currentBlock + 1} of {blockCount} is complete.");
-                    }
-                    else
-                    {
-                        answerUI.SetActive(false);
-                        endUI.SetActive(true);
-                    }
+                    ShowCurrentBlockEnd();
                 }
                 
             }
@@ -737,10 +730,17 @@ public class StudyManager : MonoBehaviour
 
         if (currentPhase == StudyPhase.Redo)
         {
-            
+
             if (reTrialId + 1 >= redoList.Length)
             {
                 FinishResumeStudy();
+            }
+            else if (redoList[reTrialId + 1].blockIndex != currentBlock)
+            {
+                // Resume only contains missing/invalid trials. Stop before entering
+                // the next pending block so recovery uses the same block handoff as
+                // a normal Formal run.
+                ShowCurrentBlockEnd();
             }
             else
             {
@@ -752,13 +752,47 @@ public class StudyManager : MonoBehaviour
 
     public void StartNextBlock()
     {
-        if (currentPhase != StudyPhase.Formal || !HasNextBlock)
+        if (!HasNextBlock)
+        {
+            return;
+        }
+
+        if (currentPhase == StudyPhase.Redo)
+        {
+            reTrialId++;
+            EnterRecoveryTrial(redoList[reTrialId]);
+            return;
+        }
+
+        if (currentPhase != StudyPhase.Formal)
         {
             return;
         }
 
         int nextBlock = currentBlock + 1;
         EnterTrial(nextBlock, 0, StudyPhase.Formal);
+    }
+
+    private bool HasNextRecoveryBlock()
+    {
+        return redoList != null &&
+               reTrialId >= 0 &&
+               reTrialId + 1 < redoList.Length &&
+               redoList[reTrialId + 1].blockIndex != currentBlock;
+    }
+
+    private void ShowCurrentBlockEnd()
+    {
+        if (uiController != null)
+        {
+            uiController.ShowBlockEnd(
+                $"Block {currentBlock + 1} of {blockCount} is complete.");
+        }
+        else
+        {
+            answerUI.SetActive(false);
+            endUI.SetActive(true);
+        }
     }
 
     private void FinishResumeStudy()

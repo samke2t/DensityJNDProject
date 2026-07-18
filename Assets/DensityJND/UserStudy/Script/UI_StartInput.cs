@@ -10,7 +10,7 @@ using UnityEngine.InputSystem;
 public class UI_StartInput : MonoBehaviour
 {
     private const int MinimumParticipantId = 1;
-    private const int MaximumParticipantId = 20;
+    private const int MaximumParticipantId = 16;
 
     private enum StartAction
     {
